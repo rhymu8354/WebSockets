@@ -93,7 +93,25 @@ TEST(WebSocketTests, SendPingNormal) {
     ASSERT_EQ("\x89\x05Hello", connection->webSocketOutput);
 }
 
+TEST(WebSocketTests, SendPingAlmostTooMuchData) {
+    WebSockets::WebSocket ws;
+    const auto connection = std::make_shared< MockConnection >();
+    ws.Open(connection, WebSockets::WebSocket::Role::Server);
+    ws.Ping(std::string(125, 'x'));
+    ASSERT_FALSE(connection->brokenByWebSocket);
+    ASSERT_EQ(
+        std::string("\x89\x7D") + std::string(125, 'x'),
+        connection->webSocketOutput
+    );
+}
+
 TEST(WebSocketTests, SendPingTooMuchData) {
+    WebSockets::WebSocket ws;
+    const auto connection = std::make_shared< MockConnection >();
+    ws.Open(connection, WebSockets::WebSocket::Role::Server);
+    ws.Ping(std::string(126, 'x'));
+    ASSERT_FALSE(connection->brokenByWebSocket);
+    ASSERT_EQ("", connection->webSocketOutput);
 }
 
 TEST(WebSocketTests, ReceivePing) {
@@ -136,7 +154,25 @@ TEST(WebSocketTests, SendPongNormal) {
     ASSERT_EQ("\x8A\x05Hello", connection->webSocketOutput);
 }
 
+TEST(WebSocketTests, SendPongAlmostTooMuchData) {
+    WebSockets::WebSocket ws;
+    const auto connection = std::make_shared< MockConnection >();
+    ws.Open(connection, WebSockets::WebSocket::Role::Server);
+    ws.Pong(std::string(125, 'x'));
+    ASSERT_FALSE(connection->brokenByWebSocket);
+    ASSERT_EQ(
+        std::string("\x8A\x7D") + std::string(125, 'x'),
+        connection->webSocketOutput
+    );
+}
+
 TEST(WebSocketTests, SendPongTooMuchData) {
+    WebSockets::WebSocket ws;
+    const auto connection = std::make_shared< MockConnection >();
+    ws.Open(connection, WebSockets::WebSocket::Role::Server);
+    ws.Pong(std::string(126, 'x'));
+    ASSERT_FALSE(connection->brokenByWebSocket);
+    ASSERT_EQ("", connection->webSocketOutput);
 }
 
 TEST(WebSocketTests, ReceivePong) {

@@ -72,6 +72,12 @@ namespace WebSockets {
          */
         MessageReceivedDelegate pongDelegate;
 
+        /**
+         * This is where we put data received before it's been
+         * reassembled into frames.
+         */
+        std::vector< uint8_t > reassemblyBuffer;
+
         // Methods
 
         /**
@@ -124,11 +130,60 @@ namespace WebSockets {
                 // TODO: need to pick one at random from a strong
                 // source of entropy.
                 uint8_t maskingKey[4] = {0xDE, 0xAD, 0xBE, 0xEF};
+                for (size_t i = 0; i < sizeof(maskingKey); ++i) {
+                    frame.push_back(maskingKey[i]);
+                }
                 for (size_t i = 0; i < payload.length(); ++i) {
                     frame.push_back(payload[i] ^ maskingKey[i % 4]);
                 }
             }
             connection->SendData(frame);
+        }
+
+        /**
+         * This method is called whenever the WebSocket has reassembled
+         * a complete frame received from the remote peer.
+         *
+         * @param[in] headerLength
+         *     This is the size of the frame header, in octets.
+         *
+         * @param[in] payloadLength
+         *     This is the size of the frame payload, in octets.
+         */
+        void ReceiveFrame(
+            size_t headerLength,
+            size_t payloadLength
+        ) {
+            const uint8_t opcode = (reassemblyBuffer[0] & 0x0F);
+            std::string data;
+            if (role == Role::Server) {
+                data.resize(payloadLength);
+                for (size_t i = 0; i < payloadLength; ++i) {
+                    data[i] = (
+                        reassemblyBuffer[headerLength + i]
+                        ^ reassemblyBuffer[headerLength - 4 + (i % 4)]
+                    );
+                }
+            } else {
+                (void)data.assign(
+                    reassemblyBuffer.begin() + headerLength,
+                    reassemblyBuffer.begin() + headerLength + payloadLength
+                );
+            }
+            switch (opcode) {
+                case OPCODE_PING: {
+                    if (pingDelegate != nullptr) {
+                        pingDelegate(data);
+                    }
+                    SendFrame(true, OPCODE_PONG, data);
+                } break;
+
+                case OPCODE_PONG: {
+                    if (pongDelegate != nullptr) {
+                        pongDelegate(data);
+                    }
+                } break;
+            }
         }
 
         /**
@@ -141,6 +196,57 @@ namespace WebSockets {
         void ReceiveData(
             const std::vector< uint8_t >& data
         ) {
+            (void)reassemblyBuffer.insert(
+                reassemblyBuffer.end(),
+                data.begin(),
+                data.end()
+            );
+            for(;;) {
+                if (reassemblyBuffer.size() < 2) {
+                    return;
+                }
+                const auto lengthFirstOctet = (reassemblyBuffer[1] & ~MASK);
+                size_t headerLength, payloadLength;
+                if (lengthFirstOctet == 0x7E) {
+                    headerLength = 4;
+                    if (reassemblyBuffer.size() < headerLength) {
+                        return;
+                    }
+                    payloadLength = (
+                        ((size_t)reassemblyBuffer[2] << 8)
+                        + (size_t)reassemblyBuffer[3]
+                    );
+                } else if (lengthFirstOctet == 0x7F) {
+                    headerLength = 10;
+                    if (reassemblyBuffer.size() < headerLength) {
+                        return;
+                    }
+                    payloadLength = (
+                        ((size_t)reassemblyBuffer[2] << 56)
+                        + ((size_t)reassemblyBuffer[3] << 48)
+                        + ((size_t)reassemblyBuffer[4] << 40)
+                        + ((size_t)reassemblyBuffer[5] << 32)
+                        + ((size_t)reassemblyBuffer[6] << 24)
+                        + ((size_t)reassemblyBuffer[7] << 16)
+                        + ((size_t)reassemblyBuffer[8] << 8)
+                        + (size_t)reassemblyBuffer[9]
+                    );
+                } else {
+                    headerLength = 2;
+                    payloadLength = (size_t)lengthFirstOctet;
+                }
+                if (role == Role::Server) {
+                    headerLength += 4;
+                }
+                if (reassemblyBuffer.size() < headerLength + payloadLength) {
+                    return;
+                }
+                ReceiveFrame(headerLength, payloadLength);
+                (void)reassemblyBuffer.erase(
+                    reassemblyBuffer.begin(),
+                    reassemblyBuffer.begin() + headerLength + payloadLength
+                );
+            }
         }
     };
 
