@@ -41,6 +41,11 @@ namespace {
     constexpr uint8_t OPCODE_BINARY = 0x02;
 
     /**
+     * This is the opcode for a close frame.
+     */
+    constexpr uint8_t OPCODE_CLOSE = 0x08;
+
+    /**
      * This is the opcode for a ping frame.
      */
     constexpr uint8_t OPCODE_PING = 0x09;
@@ -97,6 +102,20 @@ namespace WebSockets {
         Role role;
 
         /**
+         * This flag indicates whether or not the WebSocket has sent
+         * a close frame, and is waiting for a one to be received
+         * back before closing the WebSocket.
+         */
+        bool closeSent = false;
+
+        /**
+         * This flag indicates whether or not the WebSocket has received
+         * a close frame, and is waiting for the user to finish up
+         * and signal a close, in order to close the WebSocket.
+         */
+        bool closeReceived = false;
+
+        /**
          * This indicates what type of message the WebSocket is in the midst
          * of sending, if any.
          */
@@ -107,6 +126,12 @@ namespace WebSockets {
          * of receiving, if any.
          */
         FragmentedMessageType receiving = FragmentedMessageType::None;
+
+        /**
+         * This is the function to call whenever the WebSocket
+         * has received a close frame or has been closed due to an error.
+         */
+        CloseReceivedDelegate closeDelegate;
 
         /**
          * This is the function to call whenever a ping message
@@ -221,6 +246,12 @@ namespace WebSockets {
             size_t payloadLength
         ) {
             const bool fin = ((frameReassemblyBuffer[0] & FIN) != 0);
+            const uint8_t reservedBits = ((frameReassemblyBuffer[0] >> 4) & 0x07);
+            if (reservedBits != 0) {
+                // TODO: protocol violation -- reserved bits
+                // must be zero unless some extension that uses
+                // them has been enabled through the open handshake.
+            }
             const uint8_t opcode = (frameReassemblyBuffer[0] & 0x0F);
             std::string data;
             if (role == Role::Server) {
@@ -300,6 +331,26 @@ namespace WebSockets {
                     }
                 } break;
 
+                case OPCODE_CLOSE: {
+                    unsigned int code = 1005;
+                    std::string reason;
+                    if (data.length() >= 2) {
+                        code = (
+                            (((unsigned int)data[0] << 8) & 0xFF00)
+                            + ((unsigned int)data[1] & 0x00FF)
+                        );
+                        reason = data.substr(2);
+                    }
+                    const auto closeSentEarlier = closeSent;
+                    closeReceived = true;
+                    if (closeDelegate != nullptr) {
+                        closeDelegate(code, reason);
+                    }
+                    if (closeSentEarlier) {
+                        connection->Break(false);
+                    }
+                } break;
+
                 case OPCODE_PING: {
                     if (pingDelegate != nullptr) {
                         pingDelegate(data);
@@ -311,6 +362,10 @@ namespace WebSockets {
                     if (pongDelegate != nullptr) {
                         pongDelegate(data);
                     }
+                } break;
+
+                default: {
+                    // TODO: protocol violation -- unknown opcode.
                 } break;
             }
         }
@@ -401,7 +456,34 @@ namespace WebSockets {
         );
     }
 
+    void WebSocket::Close(
+        unsigned int code,
+        const std::string reason
+    ) {
+        if (impl_->closeSent) {
+            return;
+        }
+        impl_->closeSent = true;
+        if (code == 1006) {
+            impl_->connection->Break(false);
+        } else {
+            std::string data;
+            if (code != 1005) {
+                data.push_back((uint8_t)(code >> 8));
+                data.push_back((uint8_t)(code & 0xFF));
+                data += reason;
+            }
+            impl_->SendFrame(true, OPCODE_CLOSE, data);
+            if (impl_->closeReceived) {
+                impl_->connection->Break(true);
+            }
+        }
+    }
+
     void WebSocket::Ping(const std::string& data) {
+        if (impl_->closeSent) {
+            return;
+        }
         if (data.length() > MAX_CONTROL_FRAME_DATA_LENGTH) {
             return;
         }
@@ -409,6 +491,9 @@ namespace WebSockets {
     }
 
     void WebSocket::Pong(const std::string& data) {
+        if (impl_->closeSent) {
+            return;
+        }
         if (data.length() > MAX_CONTROL_FRAME_DATA_LENGTH) {
             return;
         }
@@ -419,6 +504,9 @@ namespace WebSockets {
         const std::string& data,
         bool lastFragment
     ) {
+        if (impl_->closeSent) {
+            return;
+        }
         if (impl_->sending == FragmentedMessageType::Binary) {
             return;
         }
@@ -439,6 +527,9 @@ namespace WebSockets {
         const std::string& data,
         bool lastFragment
     ) {
+        if (impl_->closeSent) {
+            return;
+        }
         if (impl_->sending == FragmentedMessageType::Text) {
             return;
         }
@@ -453,6 +544,10 @@ namespace WebSockets {
             ? FragmentedMessageType::None
             : FragmentedMessageType::Binary
         );
+    }
+
+    void WebSocket::SetCloseDelegate(CloseReceivedDelegate closeDelegate) {
+        impl_->closeDelegate = closeDelegate;
     }
 
     void WebSocket::SetPingDelegate(MessageReceivedDelegate pingDelegate) {

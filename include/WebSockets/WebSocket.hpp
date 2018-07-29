@@ -51,6 +51,24 @@ namespace WebSockets {
          */
         typedef std::function< void(const std::string& data) > MessageReceivedDelegate;
 
+        /**
+         * This is the type of function used to notify the user that
+         * the WebSocket has received a close frame or has been
+         * closed due to an error.
+         *
+         * @param[in] code
+         *     This is the status code from the received close frame.
+         *
+         * @param[in] reason
+         *     This is the payload data from the received close frame.
+         */
+        typedef std::function<
+            void(
+                unsigned int code,
+                const std::string& reason
+            )
+        > CloseReceivedDelegate;
+
         // Lifecycle management
     public:
         ~WebSocket();
@@ -79,6 +97,21 @@ namespace WebSockets {
         void Open(
             std::shared_ptr< Http::Connection > connection,
             Role role
+        );
+
+        /**
+         * This method initiates the closing of the WebSocket,
+         * sending a close frame with the given status code and reason.
+         *
+         * @param[in] code
+         *     This is the status code to send in the close frame.
+         *
+         * @param[in] reason
+         *     This is the reason text to send in the close frame.
+         */
+        void Close(
+            unsigned int code = 1005,
+            const std::string reason = ""
         );
 
         /**
@@ -128,6 +161,16 @@ namespace WebSockets {
             const std::string& data,
             bool lastFragment = true
         );
+
+        /**
+         * This method sets the function to call whenever the WebSocket
+         * has received a close frame or has been closed due to an error.
+         *
+         * @param[in] closeDelegate
+         *     This is the function to call whenever the WebSocket
+         *     has received a close frame or has been closed due to an error.
+         */
+        void SetCloseDelegate(CloseReceivedDelegate closeDelegate);
 
         /**
          * This method sets the function to call whenever a ping message

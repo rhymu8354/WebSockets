@@ -397,10 +397,104 @@ TEST(WebSocketTests, ReceiveFragmentedText) {
     );
 }
 
-TEST(WebSocketTests, InitiateClose) {
-    // TODO
+TEST(WebSocketTests, InitiateCloseNoStatusReturned) {
+    WebSockets::WebSocket ws;
+    const auto connection = std::make_shared< MockConnection >();
+    ws.Open(connection, WebSockets::WebSocket::Role::Server);
+    unsigned int codeReceived;
+    std::string reasonReceived;
+    bool closeReceived = false;
+    ws.SetCloseDelegate(
+        [&codeReceived, &reasonReceived, &closeReceived](
+            unsigned int code,
+            const std::string& reason
+        ){
+            codeReceived = code;
+            reasonReceived = reason;
+            closeReceived = true;
+        }
+    );
+    ws.Close(1000, "Goodbye!");
+    ASSERT_EQ("\x88\x0A\x03\xe8Goodbye!", connection->webSocketOutput);
+    ASSERT_FALSE(connection->brokenByWebSocket);
+    ASSERT_FALSE(closeReceived);
+    const std::string frame = "\x88\x80XXXX";
+    connection->dataReceivedDelegate({frame.begin(), frame.end()});
+    ASSERT_TRUE(connection->brokenByWebSocket);
+    ASSERT_TRUE(closeReceived);
+    EXPECT_EQ(1005, codeReceived);
+    EXPECT_EQ("", reasonReceived);
 }
 
-TEST(WebSocketTests, CompleteClose) {
-    // TODO
+TEST(WebSocketTests, InitiateCloseStatusReturned) {
+    WebSockets::WebSocket ws;
+    const auto connection = std::make_shared< MockConnection >();
+    ws.Open(connection, WebSockets::WebSocket::Role::Server);
+    unsigned int codeReceived;
+    std::string reasonReceived;
+    bool closeReceived = false;
+    ws.SetCloseDelegate(
+        [&codeReceived, &reasonReceived, &closeReceived](
+            unsigned int code,
+            const std::string& reason
+        ){
+            codeReceived = code;
+            reasonReceived = reason;
+            closeReceived = true;
+        }
+    );
+    ws.Close(1000, "Goodbye!");
+    ASSERT_EQ("\x88\x0A\x03\xe8Goodbye!", connection->webSocketOutput);
+    connection->webSocketOutput.clear();
+    ws.SendText("Yo Dawg, I heard you like...");
+    ws.SendBinary("Yo Dawg, I heard you like...");
+    ws.Ping();
+    ws.Pong();
+    ws.Close(1000, "Goodbye AGAIN!");
+    ASSERT_TRUE(connection->webSocketOutput.empty());
+    ASSERT_FALSE(connection->brokenByWebSocket);
+    ASSERT_FALSE(closeReceived);
+    std::string frame = "\x88\x85";
+    const std::string unmaskedPayload = "\x03\xe8" "Bye";
+    const char mask[4] = {0x12, 0x34, 0x56, 0x78};
+    frame += std::string(mask, 4);
+    for (size_t i = 0; i < unmaskedPayload.length(); ++i) {
+        frame += unmaskedPayload[i] ^ mask[i % 4];
+    }
+    connection->dataReceivedDelegate({frame.begin(), frame.end()});
+    ASSERT_TRUE(connection->brokenByWebSocket);
+    ASSERT_TRUE(closeReceived);
+    EXPECT_EQ(1000, codeReceived);
+    EXPECT_EQ("Bye", reasonReceived);
+}
+
+TEST(WebSocketTests, ReceiveClose) {
+    WebSockets::WebSocket ws;
+    const auto connection = std::make_shared< MockConnection >();
+    ws.Open(connection, WebSockets::WebSocket::Role::Server);
+    unsigned int codeReceived;
+    std::string reasonReceived;
+    bool closeReceived = false;
+    ws.SetCloseDelegate(
+        [&codeReceived, &reasonReceived, &closeReceived](
+            unsigned int code,
+            const std::string& reason
+        ){
+            codeReceived = code;
+            reasonReceived = reason;
+            closeReceived = true;
+        }
+    );
+    const std::string frame = "\x88\x80XXXX";
+    connection->dataReceivedDelegate({frame.begin(), frame.end()});
+    ASSERT_FALSE(connection->brokenByWebSocket);
+    ASSERT_TRUE(closeReceived);
+    EXPECT_EQ(1005, codeReceived);
+    EXPECT_EQ("", reasonReceived);
+    ws.Ping();
+    ASSERT_EQ(std::string("\x89\x00", 2), connection->webSocketOutput);
+    connection->webSocketOutput.clear();
+    ws.Close();
+    ASSERT_EQ(std::string("\x88\x00", 2), connection->webSocketOutput);
+    ASSERT_TRUE(connection->brokenByWebSocket);
 }
