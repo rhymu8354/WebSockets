@@ -98,20 +98,36 @@ namespace WebSockets {
         void Pong(const std::string& data = "");
 
         /**
-         * This method sends a text message over the WebSocket.
+         * This method sends a text message, or fragment thereof,
+         * over the WebSocket.
          *
          * @param[in] data
          *     This is the data to include with the message.
+         *
+         * @param[in] lastFragment
+         *     This indicates whether or not this is the last
+         *     frame in its message.
          */
-        void SendText(const std::string& data);
+        void SendText(
+            const std::string& data,
+            bool lastFragment = true
+        );
 
         /**
-         * This method sends a binary message over the WebSocket.
+         * This method sends a binary message, or fragment thereof,
+         * over the WebSocket.
          *
          * @param[in] data
          *     This is the data to include with the message.
+         *
+         * @param[in] lastFragment
+         *     This indicates whether or not this is the last
+         *     frame in its message.
          */
-        void SendBinary(const std::string& data);
+        void SendBinary(
+            const std::string& data,
+            bool lastFragment = true
+        );
 
         /**
          * This method sets the function to call whenever a ping message

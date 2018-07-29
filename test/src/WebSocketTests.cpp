@@ -326,12 +326,75 @@ TEST(WebSocketTests, ReceiveMasked) {
     );
 }
 
-TEST(WebSocketTests, SendFragmented) {
-    // TODO
+TEST(WebSocketTests, SendFragmentedText) {
+    WebSockets::WebSocket ws;
+    const auto connection = std::make_shared< MockConnection >();
+    ws.Open(connection, WebSockets::WebSocket::Role::Server);
+    ws.SendText("Hello,", false);
+    ASSERT_EQ("\x01\x06Hello,", connection->webSocketOutput);
+    connection->webSocketOutput.clear();
+    ws.SendBinary("X", true);
+    ASSERT_TRUE(connection->webSocketOutput.empty());
+    ws.Ping();
+    ASSERT_EQ(std::string("\x89\x00", 2), connection->webSocketOutput);
+    connection->webSocketOutput.clear();
+    ws.SendBinary("X", false);
+    ASSERT_TRUE(connection->webSocketOutput.empty());
+    ws.SendText(" ", false);
+    ASSERT_EQ(std::string("\x00\x01 ", 3), connection->webSocketOutput);
+    connection->webSocketOutput.clear();
+    ws.SendText("World!", true);
+    ASSERT_EQ("\x80\x06World!", connection->webSocketOutput);
 }
 
-TEST(WebSocketTests, ReceiveFragmented) {
-    // TODO
+TEST(WebSocketTests, SendFragmentedBinary) {
+    WebSockets::WebSocket ws;
+    const auto connection = std::make_shared< MockConnection >();
+    ws.Open(connection, WebSockets::WebSocket::Role::Server);
+    ws.SendBinary("Hello,", false);
+    ASSERT_EQ("\x02\x06Hello,", connection->webSocketOutput);
+    connection->webSocketOutput.clear();
+    ws.SendText("X", true);
+    ASSERT_TRUE(connection->webSocketOutput.empty());
+    ws.Ping();
+    ASSERT_EQ(std::string("\x89\x00", 2), connection->webSocketOutput);
+    connection->webSocketOutput.clear();
+    ws.SendText("X", false);
+    ASSERT_TRUE(connection->webSocketOutput.empty());
+    ws.SendBinary(" ", false);
+    ASSERT_EQ(std::string("\x00\x01 ", 3), connection->webSocketOutput);
+    connection->webSocketOutput.clear();
+    ws.SendBinary("World!", true);
+    ASSERT_EQ("\x80\x06World!", connection->webSocketOutput);
+}
+
+TEST(WebSocketTests, ReceiveFragmentedText) {
+    WebSockets::WebSocket ws;
+    const auto connection = std::make_shared< MockConnection >();
+    ws.Open(connection, WebSockets::WebSocket::Role::Client);
+    std::vector< std::string > texts;
+    ws.SetTextDelegate(
+        [&texts](
+            const std::string& data
+        ){
+            texts.push_back(data);
+        }
+    );
+    const std::vector< std::string > frames{
+        "\x01\x03" "foo",
+        std::string("\x00\x01", 2) + "b",
+        "\x80\x02" "ar",
+    };
+    for (const auto& frame: frames) {
+        connection->dataReceivedDelegate({frame.begin(), frame.end()});
+    }
+    ASSERT_FALSE(connection->brokenByWebSocket);
+    ASSERT_EQ(
+        (std::vector< std::string >{
+            "foobar",
+        }),
+        texts
+    );
 }
 
 TEST(WebSocketTests, InitiateClose) {

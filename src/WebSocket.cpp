@@ -26,6 +26,11 @@ namespace {
     constexpr uint8_t MASK = 0x80;
 
     /**
+     * This is the opcode for a continuation frame.
+     */
+    constexpr uint8_t OPCODE_CONTINUATION = 0x00;
+
+    /**
      * This is the opcode for a text frame.
      */
     constexpr uint8_t OPCODE_TEXT = 0x01;
@@ -50,6 +55,27 @@ namespace {
      */
     constexpr size_t MAX_CONTROL_FRAME_DATA_LENGTH = 125;
 
+    /**
+     * This is used to track what kind of message is being
+     * sent or received in fragments.
+     */
+    enum class FragmentedMessageType {
+        /**
+         * This means we're not sending/receiving any message.
+         */
+        None,
+
+        /**
+         * This means we're sending/receiving a text message.
+         */
+        Text,
+
+        /**
+         * This means we're sending/receiving a binary message.
+         */
+        Binary,
+    };
+
 }
 
 namespace WebSockets {
@@ -69,6 +95,18 @@ namespace WebSockets {
          * This is the role to play in the connection.
          */
         Role role;
+
+        /**
+         * This indicates what type of message the WebSocket is in the midst
+         * of sending, if any.
+         */
+        FragmentedMessageType sending = FragmentedMessageType::None;
+
+        /**
+         * This indicates what type of message the WebSocket is in the midst
+         * of receiving, if any.
+         */
+        FragmentedMessageType receiving = FragmentedMessageType::None;
 
         /**
          * This is the function to call whenever a ping message
@@ -98,7 +136,13 @@ namespace WebSockets {
          * This is where we put data received before it's been
          * reassembled into frames.
          */
-        std::vector< uint8_t > reassemblyBuffer;
+        std::vector< uint8_t > frameReassemblyBuffer;
+
+        /**
+         * This is where we put frames received before they've been
+         * reassembled into messages.
+         */
+        std::string messageReassemblyBuffer;
 
         // Methods
 
@@ -176,32 +220,83 @@ namespace WebSockets {
             size_t headerLength,
             size_t payloadLength
         ) {
-            const uint8_t opcode = (reassemblyBuffer[0] & 0x0F);
+            const bool fin = ((frameReassemblyBuffer[0] & FIN) != 0);
+            const uint8_t opcode = (frameReassemblyBuffer[0] & 0x0F);
             std::string data;
             if (role == Role::Server) {
                 data.resize(payloadLength);
                 for (size_t i = 0; i < payloadLength; ++i) {
                     data[i] = (
-                        reassemblyBuffer[headerLength + i]
-                        ^ reassemblyBuffer[headerLength - 4 + (i % 4)]
+                        frameReassemblyBuffer[headerLength + i]
+                        ^ frameReassemblyBuffer[headerLength - 4 + (i % 4)]
                     );
                 }
             } else {
                 (void)data.assign(
-                    reassemblyBuffer.begin() + headerLength,
-                    reassemblyBuffer.begin() + headerLength + payloadLength
+                    frameReassemblyBuffer.begin() + headerLength,
+                    frameReassemblyBuffer.begin() + headerLength + payloadLength
                 );
             }
             switch (opcode) {
+                case OPCODE_CONTINUATION: {
+                    messageReassemblyBuffer += data;
+                    switch (receiving) {
+                        case FragmentedMessageType::Text: {
+                            if (fin) {
+                                if (textDelegate != nullptr) {
+                                    textDelegate(messageReassemblyBuffer);
+                                }
+                            }
+                        } break;
+
+                        case FragmentedMessageType::Binary: {
+                            if (fin) {
+                                if (binaryDelegate != nullptr) {
+                                    binaryDelegate(messageReassemblyBuffer);
+                                }
+                            }
+                        } break;
+
+                        default: {
+                            messageReassemblyBuffer.clear();
+                            // TODO: unexpected continuation
+                        } break;
+                    }
+                    if (fin) {
+                        receiving = FragmentedMessageType::None;
+                        messageReassemblyBuffer.clear();
+                    }
+                } break;
+
                 case OPCODE_TEXT: {
-                    if (textDelegate != nullptr) {
-                        textDelegate(data);
+                    if (receiving == FragmentedMessageType::None) {
+                        if (fin) {
+                            if (textDelegate != nullptr) {
+                                textDelegate(data);
+                            }
+                        } else {
+                            receiving = FragmentedMessageType::Text;
+                            messageReassemblyBuffer = data;
+                        }
+                    } else {
+                        // TODO: protocol violation -- start of next message
+                        // before last was complete.
                     }
                 } break;
 
                 case OPCODE_BINARY: {
-                    if (binaryDelegate != nullptr) {
-                        binaryDelegate(data);
+                    if (receiving == FragmentedMessageType::None) {
+                        if (fin) {
+                            if (binaryDelegate != nullptr) {
+                                binaryDelegate(data);
+                            }
+                        } else {
+                            receiving = FragmentedMessageType::Binary;
+                            messageReassemblyBuffer = data;
+                        }
+                    } else {
+                        // TODO: protocol violation -- start of next message
+                        // before last was complete.
                     }
                 } break;
 
@@ -230,40 +325,40 @@ namespace WebSockets {
         void ReceiveData(
             const std::vector< uint8_t >& data
         ) {
-            (void)reassemblyBuffer.insert(
-                reassemblyBuffer.end(),
+            (void)frameReassemblyBuffer.insert(
+                frameReassemblyBuffer.end(),
                 data.begin(),
                 data.end()
             );
             for(;;) {
-                if (reassemblyBuffer.size() < 2) {
+                if (frameReassemblyBuffer.size() < 2) {
                     return;
                 }
-                const auto lengthFirstOctet = (reassemblyBuffer[1] & ~MASK);
+                const auto lengthFirstOctet = (frameReassemblyBuffer[1] & ~MASK);
                 size_t headerLength, payloadLength;
                 if (lengthFirstOctet == 0x7E) {
                     headerLength = 4;
-                    if (reassemblyBuffer.size() < headerLength) {
+                    if (frameReassemblyBuffer.size() < headerLength) {
                         return;
                     }
                     payloadLength = (
-                        ((size_t)reassemblyBuffer[2] << 8)
-                        + (size_t)reassemblyBuffer[3]
+                        ((size_t)frameReassemblyBuffer[2] << 8)
+                        + (size_t)frameReassemblyBuffer[3]
                     );
                 } else if (lengthFirstOctet == 0x7F) {
                     headerLength = 10;
-                    if (reassemblyBuffer.size() < headerLength) {
+                    if (frameReassemblyBuffer.size() < headerLength) {
                         return;
                     }
                     payloadLength = (
-                        ((size_t)reassemblyBuffer[2] << 56)
-                        + ((size_t)reassemblyBuffer[3] << 48)
-                        + ((size_t)reassemblyBuffer[4] << 40)
-                        + ((size_t)reassemblyBuffer[5] << 32)
-                        + ((size_t)reassemblyBuffer[6] << 24)
-                        + ((size_t)reassemblyBuffer[7] << 16)
-                        + ((size_t)reassemblyBuffer[8] << 8)
-                        + (size_t)reassemblyBuffer[9]
+                        ((size_t)frameReassemblyBuffer[2] << 56)
+                        + ((size_t)frameReassemblyBuffer[3] << 48)
+                        + ((size_t)frameReassemblyBuffer[4] << 40)
+                        + ((size_t)frameReassemblyBuffer[5] << 32)
+                        + ((size_t)frameReassemblyBuffer[6] << 24)
+                        + ((size_t)frameReassemblyBuffer[7] << 16)
+                        + ((size_t)frameReassemblyBuffer[8] << 8)
+                        + (size_t)frameReassemblyBuffer[9]
                     );
                 } else {
                     headerLength = 2;
@@ -272,13 +367,13 @@ namespace WebSockets {
                 if (role == Role::Server) {
                     headerLength += 4;
                 }
-                if (reassemblyBuffer.size() < headerLength + payloadLength) {
+                if (frameReassemblyBuffer.size() < headerLength + payloadLength) {
                     return;
                 }
                 ReceiveFrame(headerLength, payloadLength);
-                (void)reassemblyBuffer.erase(
-                    reassemblyBuffer.begin(),
-                    reassemblyBuffer.begin() + headerLength + payloadLength
+                (void)frameReassemblyBuffer.erase(
+                    frameReassemblyBuffer.begin(),
+                    frameReassemblyBuffer.begin() + headerLength + payloadLength
                 );
             }
         }
@@ -320,12 +415,44 @@ namespace WebSockets {
         impl_->SendFrame(true, OPCODE_PONG, data);
     }
 
-    void WebSocket::SendText(const std::string& data) {
-        impl_->SendFrame(true, OPCODE_TEXT, data);
+    void WebSocket::SendText(
+        const std::string& data,
+        bool lastFragment
+    ) {
+        if (impl_->sending == FragmentedMessageType::Binary) {
+            return;
+        }
+        const auto opcode = (
+            (impl_->sending == FragmentedMessageType::Text)
+            ? OPCODE_CONTINUATION
+            : OPCODE_TEXT
+        );
+        impl_->SendFrame(lastFragment, opcode, data);
+        impl_->sending = (
+            lastFragment
+            ? FragmentedMessageType::None
+            : FragmentedMessageType::Text
+        );
     }
 
-    void WebSocket::SendBinary(const std::string& data) {
-        impl_->SendFrame(true, OPCODE_BINARY, data);
+    void WebSocket::SendBinary(
+        const std::string& data,
+        bool lastFragment
+    ) {
+        if (impl_->sending == FragmentedMessageType::Text) {
+            return;
+        }
+        const auto opcode = (
+            (impl_->sending == FragmentedMessageType::Binary)
+            ? OPCODE_CONTINUATION
+            : OPCODE_BINARY
+        );
+        impl_->SendFrame(lastFragment, opcode, data);
+        impl_->sending = (
+            lastFragment
+            ? FragmentedMessageType::None
+            : FragmentedMessageType::Binary
+        );
     }
 
     void WebSocket::SetPingDelegate(MessageReceivedDelegate pingDelegate) {
