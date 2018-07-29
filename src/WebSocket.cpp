@@ -7,6 +7,7 @@
  */
 
 #include <stdint.h>
+#include <SystemAbstractions/CryptoRandom.hpp>
 #include <WebSockets/WebSocket.hpp>
 #include <vector>
 
@@ -169,6 +170,11 @@ namespace WebSockets {
          */
         std::string messageReassemblyBuffer;
 
+        /**
+         * This is used to generate masking keys that have strong entropy.
+         */
+        SystemAbstractions::CryptoRandom rng;
+
         // Methods
 
         /**
@@ -218,9 +224,8 @@ namespace WebSockets {
                     payload.end()
                 );
             } else {
-                // TODO: need to pick one at random from a strong
-                // source of entropy.
-                uint8_t maskingKey[4] = {0xDE, 0xAD, 0xBE, 0xEF};
+                uint8_t maskingKey[4];
+                rng.Generate(maskingKey, sizeof(maskingKey));
                 for (size_t i = 0; i < sizeof(maskingKey); ++i) {
                     frame.push_back(maskingKey[i]);
                 }
