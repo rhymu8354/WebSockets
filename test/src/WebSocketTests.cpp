@@ -7,15 +7,37 @@
  * © 2018 by Richard Walters
  */
 
+#include <Base64/Base64.hpp>
 #include <gtest/gtest.h>
 #include <Http/Connection.hpp>
 #include <memory>
+#include <Sha1/Sha1.hpp>
 #include <stddef.h>
 #include <string>
+#include <SystemAbstractions/StringExtensions.hpp>
 #include <vector>
 #include <WebSockets/WebSocket.hpp>
 
 namespace {
+
+    /**
+     * This function takes a string and swaps all upper-case characters
+     * with their lower-case equivalents, returning the result.
+     *
+     * @param[in] inString
+     *     This is the string to be normalized.
+     *
+     * @return
+     *     The normalized string is returned.  All upper-case characters
+     *     are replaced with their lower-case equivalents.
+     */
+    std::string NormalizeCaseInsensitiveString(const std::string& inString) {
+        std::string outString;
+        for (char c: inString) {
+            outString.push_back(tolower(c));
+        }
+        return outString;
+    }
 
     /**
      * This is a fake client connection which is used to test WebSockets.
@@ -78,12 +100,106 @@ namespace {
 
 }
 
-TEST(WebSocketTests, InitiateOpen) {
-    // TODO
+TEST(WebSocketTests, InitiateOpenAsClient) {
+    WebSockets::WebSocket ws;
+    Http::Request request;
+    ws.StartOpenAsClient(request);
+    EXPECT_EQ("13", request.headers.GetHeaderValue("Sec-WebSocket-Version"));
+    ASSERT_TRUE(request.headers.HasHeader("Sec-WebSocket-Key"));
+    const auto key = request.headers.GetHeaderValue("Sec-WebSocket-Key");
+    EXPECT_EQ(
+        key,
+        Base64::Base64Encode(Base64::Base64Decode(key))
+    );
+    EXPECT_EQ(
+        "websocket",
+        NormalizeCaseInsensitiveString(request.headers.GetHeaderValue("Upgrade"))
+    );
+    bool foundUpgradeToken = false;
+    for (const auto token: request.headers.GetHeaderTokens("Connection")) {
+        if (token == "upgrade") {
+            foundUpgradeToken = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(foundUpgradeToken);
 }
 
-TEST(WebSocketTests, CompleteOpen) {
-    // TODO
+TEST(WebSocketTests, CompleteOpenAsClient) {
+    WebSockets::WebSocket ws;
+    Http::Request request;
+    ws.StartOpenAsClient(request);
+    Http::Response response;
+    response.statusCode = 101;
+    response.headers.SetHeader("Connection", "upgrade");
+    response.headers.SetHeader("Upgrade", "websocket");
+    response.headers.SetHeader(
+        "Sec-WebSocket-Accept",
+        Base64::Base64Encode(
+            Sha1::Sha1(
+                request.headers.GetHeaderValue("Sec-WebSocket-Key")
+                + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+            )
+        )
+    );
+    const auto connection = std::make_shared< MockConnection >();
+    ASSERT_TRUE(
+        ws.FinishOpenAsClient(
+            connection,
+            response
+        )
+    );
+    const std::string data = "Hello";
+    ws.Ping(data);
+    ASSERT_EQ(data.length() + 6, connection->webSocketOutput.length());
+    ASSERT_EQ("\x89\x85", connection->webSocketOutput.substr(0, 2));
+    for (size_t i = 0; i < data.length(); ++i) {
+        ASSERT_EQ(
+            data[i] ^ connection->webSocketOutput[2 + (i % 4)],
+            connection->webSocketOutput[6 + i]
+        );
+    }
+}
+
+TEST(WebSocketTests, CompleteOpenAsServer) {
+    WebSockets::WebSocket ws;
+    Http::Request request;
+    request.headers.SetHeader("Connection", "upgrade");
+    request.headers.SetHeader("Upgrade", "websocket");
+    request.headers.SetHeader("Sec-WebSocket-Version", "13");
+    const std::string key = Base64::Base64Encode("abcdefghijklmnop");
+    request.headers.SetHeader("Sec-WebSocket-Key", key);
+    Http::Response response;
+    const auto connection = std::make_shared< MockConnection >();
+    ASSERT_TRUE(
+        ws.OpenAsServer(
+            connection,
+            request,
+            response
+        )
+    );
+    EXPECT_EQ(101, response.statusCode);
+    EXPECT_EQ("Switching Protocols", response.reasonPhrase);
+    EXPECT_EQ(
+        "websocket",
+        NormalizeCaseInsensitiveString(response.headers.GetHeaderValue("Upgrade"))
+    );
+    bool foundUpgradeToken = false;
+    for (const auto token: response.headers.GetHeaderTokens("Connection")) {
+        if (token == "upgrade") {
+            foundUpgradeToken = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(foundUpgradeToken);
+    EXPECT_EQ(
+        Base64::Base64Encode(
+            Sha1::Sha1(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
+        ),
+        response.headers.GetHeaderValue("Sec-WebSocket-Accept")
+    );
+    ws.Ping("Hello");
+    ASSERT_EQ("\x89\x05Hello", connection->webSocketOutput);
 }
 
 TEST(WebSocketTests, SendPingNormalWithData) {

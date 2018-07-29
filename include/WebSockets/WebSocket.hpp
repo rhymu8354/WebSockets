@@ -11,6 +11,8 @@
 
 #include <functional>
 #include <Http/Connection.hpp>
+#include <Http/Request.hpp>
+#include <Http/Response.hpp>
 #include <memory>
 #include <string>
 
@@ -83,6 +85,70 @@ namespace WebSockets {
          * This is the default constructor.
          */
         WebSocket();
+
+        /**
+         * This method puts the WebSocket into the OPENING state,
+         * in the client role, updating the given HTTP request
+         * in order to perform the opening handshake.
+         *
+         * @param[in,out] request
+         *     This is the HTTP request that will be used to perform
+         *     the opening handshake of the WebSocket.  This method
+         *     updates the request to include the proper headers.
+         */
+        void StartOpenAsClient(
+            Http::Request& request
+        );
+
+        /**
+         * This method puts the WebSocket into the OPENED state,
+         * in the client role, by checking the given HTTP response
+         * returned that completes the handshake.
+         *
+         * @param[in] connection
+         *     This is the connection to use to send and receive frames.
+         *
+         * @param[in] response
+         *     This is the HTTP response that completed the opening
+         *     handshake of the WebSocket.  This response may indicate
+         *     that the handshake failed.
+         *
+         * @return
+         *     An indication of whether or not the opening handshake
+         *     succeeded is returned.
+         */
+        bool FinishOpenAsClient(
+            std::shared_ptr< Http::Connection > connection,
+            const Http::Response& response
+        );
+
+        /**
+         * This method puts the WebSocket into the OPENED state,
+         * in the server role, by checking the given HTTP request
+         * and updating the given HTTP response accordingly,
+         * to perform the opening handshake.
+         *
+         * @param[in] connection
+         *     This is the connection to use to send and receive frames.
+         *
+         * @param[in] request
+         *     This is the HTTP request that initiated the opening
+         *     handshake of the WebSocket.
+         *
+         * @param[in,out] response
+         *     This is the HTTP response that completes the opening
+         *     handshake of the WebSocket.  This response may be updated
+         *     to indicate that the handshake failed.
+         *
+         * @return
+         *     An indication of whether or not the opening handshake
+         *     succeeded is returned.
+         */
+        bool OpenAsServer(
+            std::shared_ptr< Http::Connection > connection,
+            const Http::Request& request,
+            Http::Response& response
+        );
 
         /**
          * This method puts the WebSocket into the OPENED state,

@@ -6,12 +6,33 @@
  * © 2018 by Richard Walters
  */
 
+#include <Base64/Base64.hpp>
+#include <Sha1/Sha1.hpp>
 #include <stdint.h>
 #include <SystemAbstractions/CryptoRandom.hpp>
 #include <WebSockets/WebSocket.hpp>
 #include <vector>
 
 namespace {
+
+    /**
+     * This is the version of the WebSocket protocol that this class supports.
+     */
+    const std::string CURRENTLY_SUPPORTED_WEBSOCKET_VERSION = "13";
+
+    /**
+     * This is the required length of the Base64 decoding of the
+     * "Sec-WebSocket-Key" header in HTTP requests that initiate a WebSocket
+     * opening handshake.
+     */
+    constexpr size_t REQUIRED_WEBSOCKET_KEY_LENGTH = 16;
+
+    /**
+     * This is the string added to the "Sec-WebSocket-Key" before computing
+     * the SHA-1 hash and Base64 encoding the result to form the
+     * corresponding "Sec-WebSocket-Accept" value.
+     */
+    const std::string WEBSOCKET_KEY_SALT = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
     /**
      * This is the bit to set in the first octet of a WebSocket frame
@@ -82,6 +103,42 @@ namespace {
         Binary,
     };
 
+    /**
+     * This function takes a string and swaps all upper-case characters
+     * with their lower-case equivalents, returning the result.
+     *
+     * @param[in] inString
+     *     This is the string to be normalized.
+     *
+     * @return
+     *     The normalized string is returned.  All upper-case characters
+     *     are replaced with their lower-case equivalents.
+     */
+    std::string NormalizeCaseInsensitiveString(const std::string& inString) {
+        std::string outString;
+        for (char c: inString) {
+            outString.push_back(tolower(c));
+        }
+        return outString;
+    }
+
+    /**
+     * This function computes the value of the "Sec-WebSocket-Accept"
+     * HTTP response header that matches the given value of the
+     * "Sec-WebSocket-Key" HTTP request header.
+     *
+     * @param[in] key
+     *     This is the key value for which to compute the matching answer.
+     *
+     * @return
+     *     The answer computed from the given key is returned.
+     */
+    std::string ComputeKeyAnswer(const std::string& key) {
+        return Base64::Base64Encode(
+            Sha1::Sha1(key + WEBSOCKET_KEY_SALT)
+        );
+    }
+
 }
 
 namespace WebSockets {
@@ -101,6 +158,13 @@ namespace WebSockets {
          * This is the role to play in the connection.
          */
         Role role;
+
+        /**
+         * This is the Base64 encoded randomly-generated data set for
+         * the Sec-WebSocket-Key header sent in the HTTP request
+         * of the opening handshake, when opening as a client.
+         */
+        std::string key;
 
         /**
          * This flag indicates whether or not the WebSocket has sent
@@ -444,6 +508,85 @@ namespace WebSockets {
     WebSocket::WebSocket()
         : impl_(new Impl)
     {
+    }
+
+    void WebSocket::StartOpenAsClient(
+        Http::Request& request
+    ) {
+        request.headers.SetHeader("Sec-WebSocket-Version", CURRENTLY_SUPPORTED_WEBSOCKET_VERSION);
+        char nonce[16];
+        impl_->rng.Generate(nonce, sizeof(nonce));
+        impl_->key = Base64::Base64Encode(
+            std::string(nonce, sizeof(nonce))
+        );
+        request.headers.SetHeader("Sec-WebSocket-Key", impl_->key);
+        request.headers.SetHeader("Upgrade", "websocket");
+        auto connectionTokens = request.headers.GetHeaderMultiValue("Connection");
+        connectionTokens.push_back("upgrade");
+        request.headers.SetHeader("Connection", connectionTokens, true);
+    }
+
+    bool WebSocket::FinishOpenAsClient(
+        std::shared_ptr< Http::Connection > connection,
+        const Http::Response& response
+    ) {
+        if (response.statusCode != 101) {
+            return false;
+        }
+        bool foundUpgradeToken = false;
+        for (const auto token: response.headers.GetHeaderTokens("Connection")) {
+            if (token == "upgrade") {
+                foundUpgradeToken = true;
+                break;
+            }
+        }
+        if (!foundUpgradeToken) {
+            return false;
+        }
+        if (NormalizeCaseInsensitiveString(response.headers.GetHeaderValue("Upgrade")) != "websocket") {
+            return false;
+        }
+        if (response.headers.GetHeaderValue("Sec-WebSocket-Accept") != ComputeKeyAnswer(impl_->key)) {
+            return false;
+        }
+        Open(connection, Role::Client);
+        return true;
+    }
+
+    bool WebSocket::OpenAsServer(
+        std::shared_ptr< Http::Connection > connection,
+        const Http::Request& request,
+        Http::Response& response
+    ) {
+        if (request.headers.GetHeaderValue("Sec-WebSocket-Version") != CURRENTLY_SUPPORTED_WEBSOCKET_VERSION) {
+            return false;
+        }
+        bool foundUpgradeToken = false;
+        for (const auto token: request.headers.GetHeaderTokens("Connection")) {
+            if (token == "upgrade") {
+                foundUpgradeToken = true;
+                break;
+            }
+        }
+        if (!foundUpgradeToken) {
+            return false;
+        }
+        if (NormalizeCaseInsensitiveString(request.headers.GetHeaderValue("Upgrade")) != "websocket") {
+            return false;
+        }
+        impl_->key = request.headers.GetHeaderValue("Sec-WebSocket-Key");
+        if (Base64::Base64Decode(impl_->key).length() != REQUIRED_WEBSOCKET_KEY_LENGTH) {
+            return false;
+        }
+        auto connectionTokens = response.headers.GetHeaderMultiValue("Connection");
+        connectionTokens.push_back("upgrade");
+        response.statusCode = 101;
+        response.reasonPhrase = "Switching Protocols";
+        response.headers.SetHeader("Connection", connectionTokens, true);
+        response.headers.SetHeader("Upgrade", "websocket");
+        response.headers.SetHeader("Sec-WebSocket-Accept", ComputeKeyAnswer(impl_->key));
+        Open(connection, Role::Server);
+        return true;
     }
 
     void WebSocket::Open(
