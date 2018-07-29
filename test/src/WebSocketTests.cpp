@@ -79,18 +79,28 @@ namespace {
 }
 
 TEST(WebSocketTests, InitiateOpen) {
+    // TODO
 }
 
 TEST(WebSocketTests, CompleteOpen) {
+    // TODO
 }
 
-TEST(WebSocketTests, SendPingNormal) {
+TEST(WebSocketTests, SendPingNormalWithData) {
     WebSockets::WebSocket ws;
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Server);
     ws.Ping("Hello");
     ASSERT_FALSE(connection->brokenByWebSocket);
     ASSERT_EQ("\x89\x05Hello", connection->webSocketOutput);
+}
+
+TEST(WebSocketTests, SendPingNormalWithoutData) {
+    WebSockets::WebSocket ws;
+    const auto connection = std::make_shared< MockConnection >();
+    ws.Open(connection, WebSockets::WebSocket::Role::Server);
+    ws.Ping();
+    ASSERT_EQ(std::string("\x89\x00", 2), connection->webSocketOutput);
 }
 
 TEST(WebSocketTests, SendPingAlmostTooMuchData) {
@@ -145,13 +155,21 @@ TEST(WebSocketTests, ReceivePing) {
     }
 }
 
-TEST(WebSocketTests, SendPongNormal) {
+TEST(WebSocketTests, SendPongNormalWithData) {
     WebSockets::WebSocket ws;
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Server);
     ws.Pong("Hello");
     ASSERT_FALSE(connection->brokenByWebSocket);
     ASSERT_EQ("\x8A\x05Hello", connection->webSocketOutput);
+}
+
+TEST(WebSocketTests, SendPongNormalWithoutData) {
+    WebSockets::WebSocket ws;
+    const auto connection = std::make_shared< MockConnection >();
+    ws.Open(connection, WebSockets::WebSocket::Role::Server);
+    ws.Pong();
+    ASSERT_EQ(std::string("\x8A\x00", 2), connection->webSocketOutput);
 }
 
 TEST(WebSocketTests, SendPongAlmostTooMuchData) {
@@ -199,31 +217,89 @@ TEST(WebSocketTests, ReceivePong) {
 }
 
 TEST(WebSocketTests, SendText) {
+    WebSockets::WebSocket ws;
+    const auto connection = std::make_shared< MockConnection >();
+    ws.Open(connection, WebSockets::WebSocket::Role::Server);
+    ws.SendText("Hello, World!");
+    ASSERT_FALSE(connection->brokenByWebSocket);
+    ASSERT_EQ("\x81\x0DHello, World!", connection->webSocketOutput);
 }
 
 TEST(WebSocketTests, ReceiveText) {
+    WebSockets::WebSocket ws;
+    const auto connection = std::make_shared< MockConnection >();
+    ws.Open(connection, WebSockets::WebSocket::Role::Client);
+    std::vector< std::string > texts;
+    ws.SetTextDelegate(
+        [&texts](
+            const std::string& data
+        ){
+            texts.push_back(data);
+        }
+    );
+    const std::string frame = "\x81\x06" "foobar";
+    connection->dataReceivedDelegate({frame.begin(), frame.end()});
+    ASSERT_FALSE(connection->brokenByWebSocket);
+    ASSERT_EQ(
+        (std::vector< std::string >{
+            "foobar",
+        }),
+        texts
+    );
 }
 
 TEST(WebSocketTests, SendBinary) {
+    WebSockets::WebSocket ws;
+    const auto connection = std::make_shared< MockConnection >();
+    ws.Open(connection, WebSockets::WebSocket::Role::Server);
+    ws.SendBinary("Hello, World!");
+    ASSERT_FALSE(connection->brokenByWebSocket);
+    ASSERT_EQ("\x82\x0DHello, World!", connection->webSocketOutput);
 }
 
 TEST(WebSocketTests, ReceiveBinary) {
+    WebSockets::WebSocket ws;
+    const auto connection = std::make_shared< MockConnection >();
+    ws.Open(connection, WebSockets::WebSocket::Role::Client);
+    std::vector< std::string > binaries;
+    ws.SetBinaryDelegate(
+        [&binaries](
+            const std::string& data
+        ){
+            binaries.push_back(data);
+        }
+    );
+    const std::string frame = "\x82\x06" "foobar";
+    connection->dataReceivedDelegate({frame.begin(), frame.end()});
+    ASSERT_FALSE(connection->brokenByWebSocket);
+    ASSERT_EQ(
+        (std::vector< std::string >{
+            "foobar",
+        }),
+        binaries
+    );
 }
 
 TEST(WebSocketTests, SendMasked) {
+    // TODO
 }
 
 TEST(WebSocketTests, ReceiveMasked) {
+    // TODO
 }
 
 TEST(WebSocketTests, SendFragmented) {
+    // TODO
 }
 
 TEST(WebSocketTests, ReceiveFragmented) {
+    // TODO
 }
 
 TEST(WebSocketTests, InitiateClose) {
+    // TODO
 }
 
 TEST(WebSocketTests, CompleteClose) {
+    // TODO
 }

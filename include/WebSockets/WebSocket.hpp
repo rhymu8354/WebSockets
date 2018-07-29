@@ -98,6 +98,22 @@ namespace WebSockets {
         void Pong(const std::string& data = "");
 
         /**
+         * This method sends a text message over the WebSocket.
+         *
+         * @param[in] data
+         *     This is the data to include with the message.
+         */
+        void SendText(const std::string& data);
+
+        /**
+         * This method sends a binary message over the WebSocket.
+         *
+         * @param[in] data
+         *     This is the data to include with the message.
+         */
+        void SendBinary(const std::string& data);
+
+        /**
          * This method sets the function to call whenever a ping message
          * is received by the WebSocket.
          *
@@ -116,6 +132,26 @@ namespace WebSockets {
          *     is received by the WebSocket.
          */
         void SetPongDelegate(MessageReceivedDelegate pongDelegate);
+
+        /**
+         * This method sets the function to call whenever a text message
+         * is received by the WebSocket.
+         *
+         * @param[in] textDelegate
+         *     This is the function to call whenever a text message
+         *     is received by the WebSocket.
+         */
+        void SetTextDelegate(MessageReceivedDelegate textDelegate);
+
+        /**
+         * This method sets the function to call whenever a binary message
+         * is received by the WebSocket.
+         *
+         * @param[in] binaryDelegate
+         *     This is the function to call whenever a binary message
+         *     is received by the WebSocket.
+         */
+        void SetBinaryDelegate(MessageReceivedDelegate binaryDelegate);
 
         // Private properties
     private:

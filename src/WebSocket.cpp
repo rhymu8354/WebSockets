@@ -26,6 +26,16 @@ namespace {
     constexpr uint8_t MASK = 0x80;
 
     /**
+     * This is the opcode for a text frame.
+     */
+    constexpr uint8_t OPCODE_TEXT = 0x01;
+
+    /**
+     * This is the opcode for a binary frame.
+     */
+    constexpr uint8_t OPCODE_BINARY = 0x02;
+
+    /**
      * This is the opcode for a ping frame.
      */
     constexpr uint8_t OPCODE_PING = 0x09;
@@ -71,6 +81,18 @@ namespace WebSockets {
          * is received by the WebSocket.
          */
         MessageReceivedDelegate pongDelegate;
+
+        /**
+         * This is the function to call whenever a text message
+         * is received by the WebSocket.
+         */
+        MessageReceivedDelegate textDelegate;
+
+        /**
+         * This is the function to call whenever a binary message
+         * is received by the WebSocket.
+         */
+        MessageReceivedDelegate binaryDelegate;
 
         /**
          * This is where we put data received before it's been
@@ -171,6 +193,18 @@ namespace WebSockets {
                 );
             }
             switch (opcode) {
+                case OPCODE_TEXT: {
+                    if (textDelegate != nullptr) {
+                        textDelegate(data);
+                    }
+                } break;
+
+                case OPCODE_BINARY: {
+                    if (binaryDelegate != nullptr) {
+                        binaryDelegate(data);
+                    }
+                } break;
+
                 case OPCODE_PING: {
                     if (pingDelegate != nullptr) {
                         pingDelegate(data);
@@ -286,12 +320,28 @@ namespace WebSockets {
         impl_->SendFrame(true, OPCODE_PONG, data);
     }
 
+    void WebSocket::SendText(const std::string& data) {
+        impl_->SendFrame(true, OPCODE_TEXT, data);
+    }
+
+    void WebSocket::SendBinary(const std::string& data) {
+        impl_->SendFrame(true, OPCODE_BINARY, data);
+    }
+
     void WebSocket::SetPingDelegate(MessageReceivedDelegate pingDelegate) {
         impl_->pingDelegate = pingDelegate;
     }
 
     void WebSocket::SetPongDelegate(MessageReceivedDelegate pongDelegate) {
         impl_->pongDelegate = pongDelegate;
+    }
+
+    void WebSocket::SetTextDelegate(MessageReceivedDelegate textDelegate) {
+        impl_->textDelegate = textDelegate;
+    }
+
+    void WebSocket::SetBinaryDelegate(MessageReceivedDelegate binaryDelegate) {
+        impl_->binaryDelegate = binaryDelegate;
     }
 
 }
