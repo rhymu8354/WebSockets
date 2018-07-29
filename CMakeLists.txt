@@ -1,0 +1,27 @@
+# CMakeLists.txt for WebSockets
+#
+# © 2018 by Richard Walters
+
+cmake_minimum_required(VERSION 3.8)
+set(This WebSockets)
+
+set(Headers
+    include/WebSockets/WebSocket.hpp
+)
+
+set(Sources
+    src/WebSocket.cpp
+)
+
+add_library(${This} STATIC ${Sources} ${Headers})
+set_target_properties(${This} PROPERTIES
+    FOLDER Libraries
+)
+
+target_include_directories(${This} PUBLIC include)
+
+target_link_libraries(${This} PUBLIC
+    Http
+)
+
+add_subdirectory(test)
