@@ -75,9 +75,9 @@ namespace WebSockets {
     public:
         ~WebSocket();
         WebSocket(const WebSocket&) = delete;
-        WebSocket(WebSocket&&) = delete;
+        WebSocket(WebSocket&&);
         WebSocket& operator=(const WebSocket&) = delete;
-        WebSocket& operator=(WebSocket&&) = delete;
+        WebSocket& operator=(WebSocket&&);
 
         // Public methods
     public:

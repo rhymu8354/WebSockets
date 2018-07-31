@@ -25,6 +25,7 @@ target_link_libraries(${This} PUBLIC
     Http
     Sha1
     SystemAbstractions
+    Utf8
 )
 
 add_subdirectory(test)
