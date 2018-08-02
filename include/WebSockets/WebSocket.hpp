@@ -140,6 +140,11 @@ namespace WebSockets {
          *     handshake of the WebSocket.  This response may be updated
          *     to indicate that the handshake failed.
          *
+         * @param[in] trailer
+         *     This holds any characters that have already been received
+         *     from the connection but come after the end of the open
+         *     request.
+         *
          * @return
          *     An indication of whether or not the opening handshake
          *     succeeded is returned.
@@ -147,7 +152,8 @@ namespace WebSockets {
         bool OpenAsServer(
             std::shared_ptr< Http::Connection > connection,
             const Http::Request& request,
-            Http::Response& response
+            Http::Response& response,
+            const std::string& trailer
         );
 
         /**

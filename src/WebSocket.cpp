@@ -653,7 +653,8 @@ namespace WebSockets {
     bool WebSocket::OpenAsServer(
         std::shared_ptr< Http::Connection > connection,
         const Http::Request& request,
-        Http::Response& response
+        Http::Response& response,
+        const std::string& trailer
     ) {
         if (request.method != "GET") {
             return false;
@@ -686,6 +687,14 @@ namespace WebSockets {
         response.headers.SetHeader("Upgrade", "websocket");
         response.headers.SetHeader("Sec-WebSocket-Accept", ComputeKeyAnswer(impl_->key));
         Open(connection, Role::Server);
+        if (!trailer.empty()) {
+            impl_->ReceiveData(
+                std::vector< uint8_t >(
+                    trailer.begin(),
+                    trailer.end()
+                )
+            );
+        }
         return true;
     }
 

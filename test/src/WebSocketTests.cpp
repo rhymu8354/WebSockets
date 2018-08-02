@@ -447,7 +447,8 @@ TEST(WebSocketTests, CompleteOpenAsServer) {
         ws.OpenAsServer(
             connection,
             request,
-            response
+            response,
+            ""
         )
     );
     EXPECT_EQ(101, response.statusCode);
@@ -474,6 +475,43 @@ TEST(WebSocketTests, CompleteOpenAsServer) {
     ASSERT_EQ("\x89\x05Hello", connection->webSocketOutput);
 }
 
+TEST(WebSocketTests, CompleteOpenAsServerWithTrailer) {
+    WebSockets::WebSocket ws;
+    Http::Request request;
+    request.method = "GET";
+    request.headers.SetHeader("Connection", "upgrade");
+    request.headers.SetHeader("Upgrade", "websocket");
+    request.headers.SetHeader("Sec-WebSocket-Version", "13");
+    const std::string key = Base64::Base64Encode("abcdefghijklmnop");
+    request.headers.SetHeader("Sec-WebSocket-Key", key);
+    Http::Response response;
+    const auto connection = std::make_shared< MockConnection >();
+    std::vector< std::string > pongs;
+    ws.SetPongDelegate(
+        [&pongs](
+            const std::string& data
+        ){
+            pongs.push_back(data);
+        }
+    );
+    ASSERT_TRUE(
+        ws.OpenAsServer(
+            connection,
+            request,
+            response,
+            "\x8A"
+        )
+    );
+    EXPECT_TRUE(pongs.empty());
+    connection->dataReceivedDelegate({ 0x80, 0x12, 0x34, 0x56, 0x78 });
+    ASSERT_EQ(
+        (std::vector< std::string >{
+            "",
+        }),
+        pongs
+    );
+}
+
 TEST(WebSocketTests, FailCompleteOpenAsServerNotGetMethod) {
     WebSockets::WebSocket ws;
     Http::Request request;
@@ -489,7 +527,8 @@ TEST(WebSocketTests, FailCompleteOpenAsServerNotGetMethod) {
         ws.OpenAsServer(
             connection,
             request,
-            response
+            response,
+            ""
         )
     );
 }
@@ -508,7 +547,8 @@ TEST(WebSocketTests, FailCompleteOpenAsServerMissingUpgrade) {
         ws.OpenAsServer(
             connection,
             request,
-            response
+            response,
+            ""
         )
     );
 }
@@ -528,7 +568,8 @@ TEST(WebSocketTests, FailCompleteOpenAsServerWrongUpgrade) {
         ws.OpenAsServer(
             connection,
             request,
-            response
+            response,
+            ""
         )
     );
 }
@@ -547,7 +588,8 @@ TEST(WebSocketTests, FailCompleteOpenAsServerMissingConnection) {
         ws.OpenAsServer(
             connection,
             request,
-            response
+            response,
+            ""
         )
     );
 }
@@ -567,7 +609,8 @@ TEST(WebSocketTests, FailCompleteOpenAsServerWrongConnection) {
         ws.OpenAsServer(
             connection,
             request,
-            response
+            response,
+            ""
         )
     );
 }
@@ -585,7 +628,8 @@ TEST(WebSocketTests, FailCompleteOpenAsServerMissingKey) {
         ws.OpenAsServer(
             connection,
             request,
-            response
+            response,
+            ""
         )
     );
 }
@@ -605,7 +649,8 @@ TEST(WebSocketTests, FailCompleteOpenAsServerBadKey) {
         ws.OpenAsServer(
             connection,
             request,
-            response
+            response,
+            ""
         )
     );
     key = Base64::Base64Encode("abcdefghijklmnopq");
@@ -614,7 +659,8 @@ TEST(WebSocketTests, FailCompleteOpenAsServerBadKey) {
         ws.OpenAsServer(
             connection,
             request,
-            response
+            response,
+            ""
         )
     );
     key = Base64::Base64Encode("abcdefghijklmnop");
@@ -623,7 +669,8 @@ TEST(WebSocketTests, FailCompleteOpenAsServerBadKey) {
         ws.OpenAsServer(
             connection,
             request,
-            response
+            response,
+            ""
         )
     );
 }
@@ -642,7 +689,8 @@ TEST(WebSocketTests, FailCompleteOpenAsServerMissingVersion) {
         ws.OpenAsServer(
             connection,
             request,
-            response
+            response,
+            ""
         )
     );
 }
@@ -662,7 +710,8 @@ TEST(WebSocketTests, FailCompleteOpenAsServerBadVersion) {
         ws.OpenAsServer(
             connection,
             request,
-            response
+            response,
+            ""
         )
     );
     request.headers.SetHeader("Sec-WebSocket-Version", "14");
@@ -670,7 +719,8 @@ TEST(WebSocketTests, FailCompleteOpenAsServerBadVersion) {
         ws.OpenAsServer(
             connection,
             request,
-            response
+            response,
+            ""
         )
     );
     request.headers.SetHeader("Sec-WebSocket-Version", "13");
@@ -678,7 +728,8 @@ TEST(WebSocketTests, FailCompleteOpenAsServerBadVersion) {
         ws.OpenAsServer(
             connection,
             request,
-            response
+            response,
+            ""
         )
     );
 }
