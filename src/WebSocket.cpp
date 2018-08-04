@@ -7,6 +7,7 @@
  */
 
 #include <Base64/Base64.hpp>
+#include <mutex>
 #include <Sha1/Sha1.hpp>
 #include <stdint.h>
 #include <SystemAbstractions/CryptoRandom.hpp>
@@ -156,6 +157,11 @@ namespace WebSockets {
          * diagnostic messages.
          */
         SystemAbstractions::DiagnosticsSender diagnosticsSender;
+
+        /**
+         * This is used to synchronize access to the WebSocket.
+         */
+        std::recursive_mutex mutex;
 
         /**
          * This is the connection to use to send and receive frames.
@@ -556,6 +562,7 @@ namespace WebSockets {
         void ReceiveData(
             const std::vector< uint8_t >& data
         ) {
+            std::lock_guard< decltype(mutex) > lock(mutex);
             (void)frameReassemblyBuffer.insert(
                 frameReassemblyBuffer.end(),
                 data.begin(),
@@ -614,6 +621,7 @@ namespace WebSockets {
          * the remote peer.
          */
         void ConnectionBroken() {
+            std::lock_guard< decltype(mutex) > lock(mutex);
             Close(1006, "connection broken by peer", true);
             diagnosticsSender.SendDiagnosticInformationFormatted(
                 1,
@@ -778,10 +786,12 @@ namespace WebSockets {
         unsigned int code,
         const std::string reason
     ) {
+        std::lock_guard< decltype(impl_->mutex) > lock(impl_->mutex);
         impl_->Close(code, reason);
     }
 
     void WebSocket::Ping(const std::string& data) {
+        std::lock_guard< decltype(impl_->mutex) > lock(impl_->mutex);
         if (impl_->closeSent) {
             return;
         }
@@ -792,6 +802,7 @@ namespace WebSockets {
     }
 
     void WebSocket::Pong(const std::string& data) {
+        std::lock_guard< decltype(impl_->mutex) > lock(impl_->mutex);
         if (impl_->closeSent) {
             return;
         }
@@ -805,6 +816,7 @@ namespace WebSockets {
         const std::string& data,
         bool lastFragment
     ) {
+        std::lock_guard< decltype(impl_->mutex) > lock(impl_->mutex);
         if (impl_->closeSent) {
             return;
         }
@@ -828,6 +840,7 @@ namespace WebSockets {
         const std::string& data,
         bool lastFragment
     ) {
+        std::lock_guard< decltype(impl_->mutex) > lock(impl_->mutex);
         if (impl_->closeSent) {
             return;
         }
