@@ -136,7 +136,7 @@ namespace {
      */
     std::string ComputeKeyAnswer(const std::string& key) {
         return Base64::Base64Encode(
-            Sha1::Sha1(key + WEBSOCKET_KEY_SALT)
+            Sha1::Sha1Bytes(key + WEBSOCKET_KEY_SALT)
         );
     }
 

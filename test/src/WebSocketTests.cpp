@@ -135,7 +135,7 @@ TEST(WebSocketTests, FailCompleteOpenAsClientDueToMissingUpgrade) {
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
         Base64::Base64Encode(
-            Sha1::Sha1(
+            Sha1::Sha1Bytes(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
             )
@@ -161,7 +161,7 @@ TEST(WebSocketTests, FailCompleteOpenAsClientDueToWrongUpgrade) {
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
         Base64::Base64Encode(
-            Sha1::Sha1(
+            Sha1::Sha1Bytes(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
             )
@@ -186,7 +186,7 @@ TEST(WebSocketTests, FailCompleteOpenAsClientDueToMissingConnection) {
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
         Base64::Base64Encode(
-            Sha1::Sha1(
+            Sha1::Sha1Bytes(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
             )
@@ -212,7 +212,7 @@ TEST(WebSocketTests, FailCompleteOpenAsClientDueToWrongConnection) {
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
         Base64::Base64Encode(
-            Sha1::Sha1(
+            Sha1::Sha1Bytes(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
             )
@@ -255,7 +255,7 @@ TEST(WebSocketTests, FailCompleteOpenAsClientDueToWrongAccept) {
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
         Base64::Base64Encode(
-            Sha1::Sha1(
+            Sha1::Sha1Bytes(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B12"
             )
@@ -281,7 +281,7 @@ TEST(WebSocketTests, FailCompleteOpenAsClientDueToUnsupportedExtension) {
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
         Base64::Base64Encode(
-            Sha1::Sha1(
+            Sha1::Sha1Bytes(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
             )
@@ -308,7 +308,7 @@ TEST(WebSocketTests, SucceedCompleteOpenAsClientBlankExtensions) {
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
         Base64::Base64Encode(
-            Sha1::Sha1(
+            Sha1::Sha1Bytes(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
             )
@@ -335,7 +335,7 @@ TEST(WebSocketTests, FailCompleteOpenAsClientDueToUnsupportedProtocol) {
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
         Base64::Base64Encode(
-            Sha1::Sha1(
+            Sha1::Sha1Bytes(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
             )
@@ -362,7 +362,7 @@ TEST(WebSocketTests, SucceedCompleteOpenAsClientBlankProtocol) {
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
         Base64::Base64Encode(
-            Sha1::Sha1(
+            Sha1::Sha1Bytes(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
             )
@@ -381,7 +381,7 @@ TEST(WebSocketTests, SucceedCompleteOpenAsClientBlankProtocol) {
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
         Base64::Base64Encode(
-            Sha1::Sha1(
+            Sha1::Sha1Bytes(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
             )
@@ -407,7 +407,7 @@ TEST(WebSocketTests, CompleteOpenAsClient) {
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
         Base64::Base64Encode(
-            Sha1::Sha1(
+            Sha1::Sha1Bytes(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
             )
@@ -439,7 +439,7 @@ TEST(WebSocketTests, CompleteOpenAsServer) {
     request.headers.SetHeader("Connection", "upgrade");
     request.headers.SetHeader("Upgrade", "websocket");
     request.headers.SetHeader("Sec-WebSocket-Version", "13");
-    const std::string key = Base64::Base64Encode("abcdefghijklmnop");
+    const std::string key = "dGhlIHNhbXBsZSBub25jZQ==";
     request.headers.SetHeader("Sec-WebSocket-Key", key);
     Http::Response response;
     const auto connection = std::make_shared< MockConnection >();
@@ -466,9 +466,7 @@ TEST(WebSocketTests, CompleteOpenAsServer) {
     }
     EXPECT_TRUE(foundUpgradeToken);
     EXPECT_EQ(
-        Base64::Base64Encode(
-            Sha1::Sha1(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
-        ),
+        "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=",
         response.headers.GetHeaderValue("Sec-WebSocket-Accept")
     );
     ws.Ping("Hello");
