@@ -10,6 +10,7 @@
 #include <Sha1/Sha1.hpp>
 #include <stdint.h>
 #include <SystemAbstractions/CryptoRandom.hpp>
+#include <SystemAbstractions/DiagnosticsSender.hpp>
 #include <Utf8/Utf8.hpp>
 #include <vector>
 #include <WebSockets/WebSocket.hpp>
@@ -151,6 +152,12 @@ namespace WebSockets {
         // Properties
 
         /**
+         * This is a helper object used to generate and publish
+         * diagnostic messages.
+         */
+        SystemAbstractions::DiagnosticsSender diagnosticsSender;
+
+        /**
          * This is the connection to use to send and receive frames.
          */
         std::shared_ptr< Http::Connection > connection;
@@ -243,6 +250,14 @@ namespace WebSockets {
         // Methods
 
         /**
+         * This is the constructor for the structure.
+         */
+        Impl()
+            : diagnosticsSender("WebSockets::WebSocket")
+        {
+        }
+
+        /**
          * This method responds to the WebSocket being closed.
          *
          * @param[in] code
@@ -322,6 +337,12 @@ namespace WebSockets {
                 } else if (closeReceived) {
                     connection->Break(true);
                 }
+                diagnosticsSender.SendDiagnosticInformationFormatted(
+                    1,
+                    "Connection to %s closed (%s)",
+                    connection->GetPeerId().c_str(),
+                    reason.c_str()
+                );
             }
         }
 
@@ -498,6 +519,11 @@ namespace WebSockets {
                     }
                     if (!fail) {
                         OnClose(code, reason);
+                        diagnosticsSender.SendDiagnosticInformationFormatted(
+                            1,
+                            "Connection to %s closed by peer",
+                            connection->GetPeerId().c_str()
+                        );
                     }
                 } break;
 
@@ -589,6 +615,11 @@ namespace WebSockets {
          */
         void ConnectionBroken() {
             Close(1006, "connection broken by peer", true);
+            diagnosticsSender.SendDiagnosticInformationFormatted(
+                1,
+                "Connection to %s broken by peer",
+                connection->GetPeerId().c_str()
+            );
         }
     };
 
@@ -599,6 +630,17 @@ namespace WebSockets {
     WebSocket::WebSocket()
         : impl_(new Impl)
     {
+    }
+
+    SystemAbstractions::DiagnosticsSender::SubscriptionToken WebSocket::SubscribeToDiagnostics(
+        SystemAbstractions::DiagnosticsSender::DiagnosticMessageDelegate delegate,
+        size_t minLevel
+    ) {
+        return impl_->diagnosticsSender.SubscribeToDiagnostics(delegate, minLevel);
+    }
+
+    void WebSocket::UnsubscribeFromDiagnostics(SystemAbstractions::DiagnosticsSender::SubscriptionToken subscriptionToken) {
+        impl_->diagnosticsSender.UnsubscribeFromDiagnostics(subscriptionToken);
     }
 
     void WebSocket::StartOpenAsClient(

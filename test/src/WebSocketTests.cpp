@@ -14,6 +14,7 @@
 #include <Sha1/Sha1.hpp>
 #include <stddef.h>
 #include <string>
+#include <SystemAbstractions/DiagnosticsSender.hpp>
 #include <SystemAbstractions/StringExtensions.hpp>
 #include <vector>
 #include <WebSockets/WebSocket.hpp>
@@ -100,8 +101,62 @@ namespace {
 
 }
 
-TEST(WebSocketTests, InitiateOpenAsClient) {
+/**
+ * This is the test fixture for these tests, providing common
+ * setup and teardown for each test.
+ */
+struct WebSocketTests
+    : public ::testing::Test
+{
+    // Properties
+
+    /**
+     * This is the unit under test.
+     */
     WebSockets::WebSocket ws;
+
+    /**
+     * These are the diagnostic messages that have been
+     * received from the unit under test.
+     */
+    std::vector< std::string > diagnosticMessages;
+
+    /**
+     * This is the subscription token obtained when subscribing
+     * to receive diagnostic messages from the unit under test.
+     */
+    SystemAbstractions::DiagnosticsSender::SubscriptionToken diagnosticsSubscription;
+
+    // Methods
+
+    // ::testing::Test
+
+    virtual void SetUp() {
+        diagnosticsSubscription = ws.SubscribeToDiagnostics(
+            [this](
+                std::string senderName,
+                size_t level,
+                std::string message
+            ){
+                diagnosticMessages.push_back(
+                    SystemAbstractions::sprintf(
+                        "%s[%zu]: %s",
+                        senderName.c_str(),
+                        level,
+                        message.c_str()
+                    )
+                );
+            },
+            0
+        );
+    }
+
+    virtual void TearDown() {
+        ws.UnsubscribeFromDiagnostics(diagnosticsSubscription);
+    }
+};
+
+TEST_F(WebSocketTests, InitiateOpenAsClient) {
     Http::Request request;
     ws.StartOpenAsClient(request);
     EXPECT_EQ("13", request.headers.GetHeaderValue("Sec-WebSocket-Version"));
@@ -125,8 +180,7 @@ TEST(WebSocketTests, InitiateOpenAsClient) {
     EXPECT_TRUE(foundUpgradeToken);
 }
 
-TEST(WebSocketTests, FailCompleteOpenAsClientDueToMissingUpgrade) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, FailCompleteOpenAsClientDueToMissingUpgrade) {
     Http::Request request;
     ws.StartOpenAsClient(request);
     Http::Response response;
@@ -150,8 +204,7 @@ TEST(WebSocketTests, FailCompleteOpenAsClientDueToMissingUpgrade) {
     );
 }
 
-TEST(WebSocketTests, FailCompleteOpenAsClientDueToWrongUpgrade) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, FailCompleteOpenAsClientDueToWrongUpgrade) {
     Http::Request request;
     ws.StartOpenAsClient(request);
     Http::Response response;
@@ -176,8 +229,7 @@ TEST(WebSocketTests, FailCompleteOpenAsClientDueToWrongUpgrade) {
     );
 }
 
-TEST(WebSocketTests, FailCompleteOpenAsClientDueToMissingConnection) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, FailCompleteOpenAsClientDueToMissingConnection) {
     Http::Request request;
     ws.StartOpenAsClient(request);
     Http::Response response;
@@ -201,8 +253,7 @@ TEST(WebSocketTests, FailCompleteOpenAsClientDueToMissingConnection) {
     );
 }
 
-TEST(WebSocketTests, FailCompleteOpenAsClientDueToWrongConnection) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, FailCompleteOpenAsClientDueToWrongConnection) {
     Http::Request request;
     ws.StartOpenAsClient(request);
     Http::Response response;
@@ -227,8 +278,7 @@ TEST(WebSocketTests, FailCompleteOpenAsClientDueToWrongConnection) {
     );
 }
 
-TEST(WebSocketTests, FailCompleteOpenAsClientDueToMissingAccept) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, FailCompleteOpenAsClientDueToMissingAccept) {
     Http::Request request;
     ws.StartOpenAsClient(request);
     Http::Response response;
@@ -244,8 +294,7 @@ TEST(WebSocketTests, FailCompleteOpenAsClientDueToMissingAccept) {
     );
 }
 
-TEST(WebSocketTests, FailCompleteOpenAsClientDueToWrongAccept) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, FailCompleteOpenAsClientDueToWrongAccept) {
     Http::Request request;
     ws.StartOpenAsClient(request);
     Http::Response response;
@@ -270,8 +319,7 @@ TEST(WebSocketTests, FailCompleteOpenAsClientDueToWrongAccept) {
     );
 }
 
-TEST(WebSocketTests, FailCompleteOpenAsClientDueToUnsupportedExtension) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, FailCompleteOpenAsClientDueToUnsupportedExtension) {
     Http::Request request;
     ws.StartOpenAsClient(request);
     Http::Response response;
@@ -297,8 +345,7 @@ TEST(WebSocketTests, FailCompleteOpenAsClientDueToUnsupportedExtension) {
     );
 }
 
-TEST(WebSocketTests, SucceedCompleteOpenAsClientBlankExtensions) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, SucceedCompleteOpenAsClientBlankExtensions) {
     Http::Request request;
     ws.StartOpenAsClient(request);
     Http::Response response;
@@ -324,8 +371,7 @@ TEST(WebSocketTests, SucceedCompleteOpenAsClientBlankExtensions) {
     );
 }
 
-TEST(WebSocketTests, FailCompleteOpenAsClientDueToUnsupportedProtocol) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, FailCompleteOpenAsClientDueToUnsupportedProtocol) {
     Http::Request request;
     ws.StartOpenAsClient(request);
     Http::Response response;
@@ -351,8 +397,7 @@ TEST(WebSocketTests, FailCompleteOpenAsClientDueToUnsupportedProtocol) {
     );
 }
 
-TEST(WebSocketTests, SucceedCompleteOpenAsClientBlankProtocol) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, SucceedCompleteOpenAsClientBlankProtocol) {
     Http::Request request;
     ws.StartOpenAsClient(request);
     Http::Response response;
@@ -396,8 +441,7 @@ TEST(WebSocketTests, SucceedCompleteOpenAsClientBlankProtocol) {
     );
 }
 
-TEST(WebSocketTests, CompleteOpenAsClient) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, CompleteOpenAsClient) {
     Http::Request request;
     ws.StartOpenAsClient(request);
     Http::Response response;
@@ -432,8 +476,7 @@ TEST(WebSocketTests, CompleteOpenAsClient) {
     }
 }
 
-TEST(WebSocketTests, CompleteOpenAsServer) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, CompleteOpenAsServer) {
     Http::Request request;
     request.method = "GET";
     request.headers.SetHeader("Connection", "upgrade");
@@ -473,8 +516,7 @@ TEST(WebSocketTests, CompleteOpenAsServer) {
     ASSERT_EQ("\x89\x05Hello", connection->webSocketOutput);
 }
 
-TEST(WebSocketTests, CompleteOpenAsServerConnectionTokenCapitalized) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, CompleteOpenAsServerConnectionTokenCapitalized) {
     Http::Request request;
     request.method = "GET";
     request.headers.SetHeader("Connection", "Upgrade");
@@ -494,8 +536,7 @@ TEST(WebSocketTests, CompleteOpenAsServerConnectionTokenCapitalized) {
     );
 }
 
-TEST(WebSocketTests, CompleteOpenAsServerWithTrailer) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, CompleteOpenAsServerWithTrailer) {
     Http::Request request;
     request.method = "GET";
     request.headers.SetHeader("Connection", "upgrade");
@@ -531,8 +572,7 @@ TEST(WebSocketTests, CompleteOpenAsServerWithTrailer) {
     );
 }
 
-TEST(WebSocketTests, FailCompleteOpenAsServerNotGetMethod) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, FailCompleteOpenAsServerNotGetMethod) {
     Http::Request request;
     request.method = "POST";
     request.headers.SetHeader("Connection", "upgrade");
@@ -552,8 +592,7 @@ TEST(WebSocketTests, FailCompleteOpenAsServerNotGetMethod) {
     );
 }
 
-TEST(WebSocketTests, FailCompleteOpenAsServerMissingUpgrade) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, FailCompleteOpenAsServerMissingUpgrade) {
     Http::Request request;
     request.method = "GET";
     request.headers.SetHeader("Connection", "upgrade");
@@ -572,8 +611,7 @@ TEST(WebSocketTests, FailCompleteOpenAsServerMissingUpgrade) {
     );
 }
 
-TEST(WebSocketTests, FailCompleteOpenAsServerWrongUpgrade) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, FailCompleteOpenAsServerWrongUpgrade) {
     Http::Request request;
     request.method = "GET";
     request.headers.SetHeader("Connection", "upgrade");
@@ -593,8 +631,7 @@ TEST(WebSocketTests, FailCompleteOpenAsServerWrongUpgrade) {
     );
 }
 
-TEST(WebSocketTests, FailCompleteOpenAsServerMissingConnection) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, FailCompleteOpenAsServerMissingConnection) {
     Http::Request request;
     request.method = "GET";
     request.headers.SetHeader("Upgrade", "websocket");
@@ -613,8 +650,7 @@ TEST(WebSocketTests, FailCompleteOpenAsServerMissingConnection) {
     );
 }
 
-TEST(WebSocketTests, FailCompleteOpenAsServerWrongConnection) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, FailCompleteOpenAsServerWrongConnection) {
     Http::Request request;
     request.method = "GET";
     request.headers.SetHeader("Connection", "foobar");
@@ -634,8 +670,7 @@ TEST(WebSocketTests, FailCompleteOpenAsServerWrongConnection) {
     );
 }
 
-TEST(WebSocketTests, FailCompleteOpenAsServerMissingKey) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, FailCompleteOpenAsServerMissingKey) {
     Http::Request request;
     request.method = "GET";
     request.headers.SetHeader("Connection", "upgrade");
@@ -653,8 +688,7 @@ TEST(WebSocketTests, FailCompleteOpenAsServerMissingKey) {
     );
 }
 
-TEST(WebSocketTests, FailCompleteOpenAsServerBadKey) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, FailCompleteOpenAsServerBadKey) {
     Http::Request request;
     request.method = "GET";
     request.headers.SetHeader("Connection", "upgrade");
@@ -694,8 +728,7 @@ TEST(WebSocketTests, FailCompleteOpenAsServerBadKey) {
     );
 }
 
-TEST(WebSocketTests, FailCompleteOpenAsServerMissingVersion) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, FailCompleteOpenAsServerMissingVersion) {
     Http::Request request;
     request.method = "GET";
     request.headers.SetHeader("Connection", "upgrade");
@@ -714,8 +747,7 @@ TEST(WebSocketTests, FailCompleteOpenAsServerMissingVersion) {
     );
 }
 
-TEST(WebSocketTests, FailCompleteOpenAsServerBadVersion) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, FailCompleteOpenAsServerBadVersion) {
     Http::Request request;
     request.method = "GET";
     request.headers.SetHeader("Connection", "upgrade");
@@ -753,8 +785,7 @@ TEST(WebSocketTests, FailCompleteOpenAsServerBadVersion) {
     );
 }
 
-TEST(WebSocketTests, SendPingNormalWithData) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, SendPingNormalWithData) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Server);
     ws.Ping("Hello");
@@ -762,16 +793,14 @@ TEST(WebSocketTests, SendPingNormalWithData) {
     ASSERT_EQ("\x89\x05Hello", connection->webSocketOutput);
 }
 
-TEST(WebSocketTests, SendPingNormalWithoutData) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, SendPingNormalWithoutData) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Server);
     ws.Ping();
     ASSERT_EQ(std::string("\x89\x00", 2), connection->webSocketOutput);
 }
 
-TEST(WebSocketTests, SendPingAlmostTooMuchData) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, SendPingAlmostTooMuchData) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Server);
     ws.Ping(std::string(125, 'x'));
@@ -782,8 +811,7 @@ TEST(WebSocketTests, SendPingAlmostTooMuchData) {
     );
 }
 
-TEST(WebSocketTests, SendPingTooMuchData) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, SendPingTooMuchData) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Server);
     ws.Ping(std::string(126, 'x'));
@@ -791,8 +819,7 @@ TEST(WebSocketTests, SendPingTooMuchData) {
     ASSERT_EQ("", connection->webSocketOutput);
 }
 
-TEST(WebSocketTests, ReceivePing) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, ReceivePing) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Client);
     std::vector< std::string > pings;
@@ -822,8 +849,7 @@ TEST(WebSocketTests, ReceivePing) {
     }
 }
 
-TEST(WebSocketTests, SendPongNormalWithData) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, SendPongNormalWithData) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Server);
     ws.Pong("Hello");
@@ -831,16 +857,14 @@ TEST(WebSocketTests, SendPongNormalWithData) {
     ASSERT_EQ("\x8A\x05Hello", connection->webSocketOutput);
 }
 
-TEST(WebSocketTests, SendPongNormalWithoutData) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, SendPongNormalWithoutData) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Server);
     ws.Pong();
     ASSERT_EQ(std::string("\x8A\x00", 2), connection->webSocketOutput);
 }
 
-TEST(WebSocketTests, SendPongAlmostTooMuchData) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, SendPongAlmostTooMuchData) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Server);
     ws.Pong(std::string(125, 'x'));
@@ -851,8 +875,7 @@ TEST(WebSocketTests, SendPongAlmostTooMuchData) {
     );
 }
 
-TEST(WebSocketTests, SendPongTooMuchData) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, SendPongTooMuchData) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Server);
     ws.Pong(std::string(126, 'x'));
@@ -860,8 +883,7 @@ TEST(WebSocketTests, SendPongTooMuchData) {
     ASSERT_EQ("", connection->webSocketOutput);
 }
 
-TEST(WebSocketTests, ReceivePong) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, ReceivePong) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Client);
     std::vector< std::string > pongs;
@@ -883,8 +905,7 @@ TEST(WebSocketTests, ReceivePong) {
     );
 }
 
-TEST(WebSocketTests, SendText) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, SendText) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Server);
     ws.SendText("Hello, World!");
@@ -892,8 +913,7 @@ TEST(WebSocketTests, SendText) {
     ASSERT_EQ("\x81\x0DHello, World!", connection->webSocketOutput);
 }
 
-TEST(WebSocketTests, ReceiveText) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, ReceiveText) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Client);
     std::vector< std::string > texts;
@@ -915,8 +935,7 @@ TEST(WebSocketTests, ReceiveText) {
     );
 }
 
-TEST(WebSocketTests, SendBinary) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, SendBinary) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Server);
     ws.SendBinary("Hello, World!");
@@ -924,8 +943,7 @@ TEST(WebSocketTests, SendBinary) {
     ASSERT_EQ("\x82\x0DHello, World!", connection->webSocketOutput);
 }
 
-TEST(WebSocketTests, ReceiveBinary) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, ReceiveBinary) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Client);
     std::vector< std::string > binaries;
@@ -947,8 +965,7 @@ TEST(WebSocketTests, ReceiveBinary) {
     );
 }
 
-TEST(WebSocketTests, SendMasked) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, SendMasked) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Client);
     const std::string data = "Hello, World!";
@@ -964,8 +981,7 @@ TEST(WebSocketTests, SendMasked) {
     }
 }
 
-TEST(WebSocketTests, ReceiveMasked) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, ReceiveMasked) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Server);
     std::vector< std::string > texts;
@@ -993,8 +1009,7 @@ TEST(WebSocketTests, ReceiveMasked) {
     );
 }
 
-TEST(WebSocketTests, SendFragmentedText) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, SendFragmentedText) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Server);
     ws.SendText("Hello,", false);
@@ -1014,8 +1029,7 @@ TEST(WebSocketTests, SendFragmentedText) {
     ASSERT_EQ("\x80\x06World!", connection->webSocketOutput);
 }
 
-TEST(WebSocketTests, SendFragmentedBinary) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, SendFragmentedBinary) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Server);
     ws.SendBinary("Hello,", false);
@@ -1035,8 +1049,7 @@ TEST(WebSocketTests, SendFragmentedBinary) {
     ASSERT_EQ("\x80\x06World!", connection->webSocketOutput);
 }
 
-TEST(WebSocketTests, ReceiveFragmentedText) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, ReceiveFragmentedText) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Client);
     std::vector< std::string > texts;
@@ -1064,8 +1077,7 @@ TEST(WebSocketTests, ReceiveFragmentedText) {
     );
 }
 
-TEST(WebSocketTests, InitiateCloseNoStatusReturned) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, InitiateCloseNoStatusReturned) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Server);
     unsigned int codeReceived;
@@ -1093,8 +1105,7 @@ TEST(WebSocketTests, InitiateCloseNoStatusReturned) {
     EXPECT_EQ("", reasonReceived);
 }
 
-TEST(WebSocketTests, InitiateCloseStatusReturned) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, InitiateCloseStatusReturned) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Server);
     unsigned int codeReceived;
@@ -1135,8 +1146,7 @@ TEST(WebSocketTests, InitiateCloseStatusReturned) {
     EXPECT_EQ("Bye", reasonReceived);
 }
 
-TEST(WebSocketTests, ReceiveClose) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, ReceiveClose) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Server);
     unsigned int codeReceived;
@@ -1166,6 +1176,13 @@ TEST(WebSocketTests, ReceiveClose) {
     ASSERT_TRUE(closeReceived);
     EXPECT_EQ(1005, codeReceived);
     EXPECT_EQ("", reasonReceived);
+    ASSERT_EQ(
+        (std::vector< std::string >{
+            "WebSockets::WebSocket[1]: Connection to mock-client closed by peer",
+        }),
+        diagnosticMessages
+    );
+    diagnosticMessages.clear();
     ws.Ping();
     ASSERT_EQ(std::string("\x89\x00", 2), connection->webSocketOutput);
     frame = "\x8A\x80XXXX";
@@ -1175,10 +1192,16 @@ TEST(WebSocketTests, ReceiveClose) {
     ws.Close();
     ASSERT_EQ(std::string("\x88\x00", 2), connection->webSocketOutput);
     ASSERT_TRUE(connection->brokenByWebSocket);
+    ASSERT_EQ(
+        (std::vector< std::string >{
+            "WebSockets::WebSocket[1]: Connection to mock-client closed ()",
+        }),
+        diagnosticMessages
+    );
+    diagnosticMessages.clear();
 }
 
-TEST(WebSocketTests, ViolationReservedBitsSet) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, ViolationReservedBitsSet) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Server);
     unsigned int codeReceived;
@@ -1203,8 +1226,7 @@ TEST(WebSocketTests, ViolationReservedBitsSet) {
     EXPECT_EQ("reserved bits set", reasonReceived);
 }
 
-TEST(WebSocketTests, ViolationUnexpectedContinuation) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, ViolationUnexpectedContinuation) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Server);
     unsigned int codeReceived;
@@ -1229,8 +1251,7 @@ TEST(WebSocketTests, ViolationUnexpectedContinuation) {
     EXPECT_EQ("unexpected continuation frame", reasonReceived);
 }
 
-TEST(WebSocketTests, ViolationNewTextMessageDuringFragmentedMessage) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, ViolationNewTextMessageDuringFragmentedMessage) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Server);
     unsigned int codeReceived;
@@ -1258,8 +1279,7 @@ TEST(WebSocketTests, ViolationNewTextMessageDuringFragmentedMessage) {
     EXPECT_EQ("last message incomplete", reasonReceived);
 }
 
-TEST(WebSocketTests, ViolationNewBinaryMessageDuringFragmentedMessage) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, ViolationNewBinaryMessageDuringFragmentedMessage) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Server);
     unsigned int codeReceived;
@@ -1287,8 +1307,7 @@ TEST(WebSocketTests, ViolationNewBinaryMessageDuringFragmentedMessage) {
     EXPECT_EQ("last message incomplete", reasonReceived);
 }
 
-TEST(WebSocketTests, ViolationUnknownOpcode) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, ViolationUnknownOpcode) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Server);
     unsigned int codeReceived;
@@ -1311,10 +1330,15 @@ TEST(WebSocketTests, ViolationUnknownOpcode) {
     ASSERT_TRUE(closeReceived);
     EXPECT_EQ(1002, codeReceived);
     EXPECT_EQ("unknown opcode", reasonReceived);
+    ASSERT_EQ(
+        (std::vector< std::string >{
+            "WebSockets::WebSocket[1]: Connection to mock-client closed (unknown opcode)",
+        }),
+        diagnosticMessages
+    );
 }
 
-TEST(WebSocketTests, ConnectionUnexpectedlyBroken) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, ConnectionUnexpectedlyBroken) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Server);
     unsigned int codeReceived;
@@ -1335,10 +1359,16 @@ TEST(WebSocketTests, ConnectionUnexpectedlyBroken) {
     ASSERT_TRUE(closeReceived);
     EXPECT_EQ(1006, codeReceived);
     EXPECT_EQ("connection broken by peer", reasonReceived);
+    ASSERT_EQ(
+        (std::vector< std::string >{
+            "WebSockets::WebSocket[1]: Connection to mock-client broken by peer",
+        }),
+        diagnosticMessages
+    );
+    diagnosticMessages.clear();
 }
 
-TEST(WebSocketTests, BadUtf8InText) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, BadUtf8InText) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Server);
     unsigned int codeReceived;
@@ -1369,8 +1399,7 @@ TEST(WebSocketTests, BadUtf8InText) {
     EXPECT_EQ("invalid UTF-8 encoding in text message", reasonReceived);
 }
 
-TEST(WebSocketTests, GoodUtf8InTextSplitIntoFragments) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, GoodUtf8InTextSplitIntoFragments) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Client);
     std::vector< std::string > texts;
@@ -1400,8 +1429,7 @@ TEST(WebSocketTests, GoodUtf8InTextSplitIntoFragments) {
     );
 }
 
-TEST(WebSocketTests, BadUtf8TruncatedInTextSplitIntoFragments) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, BadUtf8TruncatedInTextSplitIntoFragments) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Client);
     unsigned int codeReceived;
@@ -1446,8 +1474,7 @@ TEST(WebSocketTests, BadUtf8TruncatedInTextSplitIntoFragments) {
     EXPECT_EQ("invalid UTF-8 encoding in text message", reasonReceived);
 }
 
-TEST(WebSocketTests, ReceiveCloseInvalidUtf8InReason) {
-    WebSockets::WebSocket ws;
+TEST_F(WebSocketTests, ReceiveCloseInvalidUtf8InReason) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Server);
     unsigned int codeReceived;
