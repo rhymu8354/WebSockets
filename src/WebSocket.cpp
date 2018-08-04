@@ -753,16 +753,24 @@ namespace WebSockets {
     ) {
         impl_->connection = connection;
         impl_->role = role;
-        auto impl = impl_.get();
+        std::weak_ptr< Impl > implWeak(impl_);
         impl_->connection->SetDataReceivedDelegate(
-            [impl](
+            [implWeak](
                 const std::vector< uint8_t >& data
             ){
-                impl->ReceiveData(data);
+                const auto impl = implWeak.lock();
+                if (impl) {
+                    impl->ReceiveData(data);
+                }
             }
         );
         impl_->connection->SetBrokenDelegate(
-            [impl]{ impl->ConnectionBroken(); }
+            [implWeak]{
+                const auto impl = implWeak.lock();
+                if (impl) {
+                    impl->ConnectionBroken();
+                }
+            }
         );
     }
 
