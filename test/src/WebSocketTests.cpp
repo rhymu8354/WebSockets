@@ -475,6 +475,27 @@ TEST(WebSocketTests, CompleteOpenAsServer) {
     ASSERT_EQ("\x89\x05Hello", connection->webSocketOutput);
 }
 
+TEST(WebSocketTests, CompleteOpenAsServerConnectionTokenCapitalized) {
+    WebSockets::WebSocket ws;
+    Http::Request request;
+    request.method = "GET";
+    request.headers.SetHeader("Connection", "Upgrade");
+    request.headers.SetHeader("Upgrade", "websocket");
+    request.headers.SetHeader("Sec-WebSocket-Version", "13");
+    const std::string key = Base64::Base64Encode("abcdefghijklmnop");
+    request.headers.SetHeader("Sec-WebSocket-Key", key);
+    Http::Response response;
+    const auto connection = std::make_shared< MockConnection >();
+    ASSERT_TRUE(
+        ws.OpenAsServer(
+            connection,
+            request,
+            response,
+            ""
+        )
+    );
+}
+
 TEST(WebSocketTests, CompleteOpenAsServerWithTrailer) {
     WebSockets::WebSocket ws;
     Http::Request request;
