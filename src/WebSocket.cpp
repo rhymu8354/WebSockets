@@ -623,7 +623,14 @@ namespace WebSockets {
         }
     };
 
-    WebSocket::~WebSocket() = default;
+    WebSocket::~WebSocket() {
+        if (impl_) {
+            if (impl_->connection != nullptr) {
+                impl_->connection->SetDataReceivedDelegate(nullptr);
+                impl_->connection->SetBrokenDelegate(nullptr);
+            }
+        }
+    }
     WebSocket::WebSocket(WebSocket&&) = default;
     WebSocket& WebSocket::operator=(WebSocket&&) = default;
 
@@ -746,15 +753,16 @@ namespace WebSockets {
     ) {
         impl_->connection = connection;
         impl_->role = role;
+        auto impl = impl_.get();
         impl_->connection->SetDataReceivedDelegate(
-            [this](
+            [impl](
                 const std::vector< uint8_t >& data
             ){
-                impl_->ReceiveData(data);
+                impl->ReceiveData(data);
             }
         );
         impl_->connection->SetBrokenDelegate(
-            [this]{ impl_->ConnectionBroken(); }
+            [impl]{ impl->ConnectionBroken(); }
         );
     }
 

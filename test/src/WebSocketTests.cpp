@@ -116,6 +116,12 @@ struct WebSocketTests
     WebSockets::WebSocket ws;
 
     /**
+     * This flag is used to tell the test fixture if we
+     * moved the unit under test.
+     */
+    bool wsWasMoved = false;
+
+    /**
      * These are the diagnostic messages that have been
      * received from the unit under test.
      */
@@ -152,7 +158,9 @@ struct WebSocketTests
     }
 
     virtual void TearDown() {
-        ws.UnsubscribeFromDiagnostics(diagnosticsSubscription);
+        if (!wsWasMoved) {
+            ws.UnsubscribeFromDiagnostics(diagnosticsSubscription);
+        }
     }
 };
 
@@ -1502,4 +1510,28 @@ TEST_F(WebSocketTests, ReceiveCloseInvalidUtf8InReason) {
     ASSERT_TRUE(closeReceived);
     EXPECT_EQ(1007, codeReceived);
     EXPECT_EQ("invalid UTF-8 encoding in close reason", reasonReceived);
+}
+
+TEST_F(WebSocketTests, ReceiveTextAfterMoving) {
+    const auto connection = std::make_shared< MockConnection >();
+    ws.Open(connection, WebSockets::WebSocket::Role::Client);
+    std::vector< std::string > texts;
+    ws.SetTextDelegate(
+        [&texts](
+            const std::string& data
+        ){
+            texts.push_back(data);
+        }
+    );
+    WebSockets::WebSocket ws2(std::move(ws));
+    wsWasMoved = true;
+    const std::string frame = "\x81\x06" "foobar";
+    connection->dataReceivedDelegate({frame.begin(), frame.end()});
+    ASSERT_FALSE(connection->brokenByWebSocket);
+    ASSERT_EQ(
+        (std::vector< std::string >{
+            "foobar",
+        }),
+        texts
+    );
 }
