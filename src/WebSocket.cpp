@@ -434,6 +434,18 @@ namespace WebSockets {
                 Close(1002, "reserved bits set", true);
                 return;
             }
+            const bool mask = ((frameReassemblyBuffer[1] & MASK) != 0);
+            if (mask) {
+                if (role == Role::Client) {
+                    Close(1002, "masked frame", true);
+                    return;
+                }
+            } else {
+                if (role == Role::Server) {
+                    Close(1002, "unmasked frame", true);
+                    return;
+                }
+            }
             const uint8_t opcode = (frameReassemblyBuffer[0] & 0x0F);
             std::string data;
             if (role == Role::Server) {
@@ -602,7 +614,7 @@ namespace WebSockets {
                     headerLength = 2;
                     payloadLength = (size_t)lengthFirstOctet;
                 }
-                if (role == Role::Server) {
+                if ((frameReassemblyBuffer[1] & MASK) != 0) {
                     headerLength += 4;
                 }
                 if (frameReassemblyBuffer.size() < headerLength + payloadLength) {

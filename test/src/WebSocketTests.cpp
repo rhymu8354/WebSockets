@@ -1346,6 +1346,76 @@ TEST_F(WebSocketTests, ViolationUnknownOpcode) {
     );
 }
 
+TEST_F(WebSocketTests, ViolationClientShouldMaskFrames) {
+    const auto connection = std::make_shared< MockConnection >();
+    ws.Open(connection, WebSockets::WebSocket::Role::Server);
+    unsigned int codeReceived;
+    std::string reasonReceived;
+    bool closeReceived = false;
+    ws.SetCloseDelegate(
+        [&codeReceived, &reasonReceived, &closeReceived](
+            unsigned int code,
+            const std::string& reason
+        ){
+            codeReceived = code;
+            reasonReceived = reason;
+            closeReceived = true;
+        }
+    );
+    std::string frame = std::string("\x89\x00", 2);
+    connection->dataReceivedDelegate({frame.begin(), frame.end()});
+    ASSERT_EQ("\x88\x10\x03\xeaunmasked frame", connection->webSocketOutput);
+    ASSERT_TRUE(connection->brokenByWebSocket);
+    ASSERT_TRUE(closeReceived);
+    EXPECT_EQ(1002, codeReceived);
+    EXPECT_EQ("unmasked frame", reasonReceived);
+    ASSERT_EQ(
+        (std::vector< std::string >{
+            "WebSockets::WebSocket[1]: Connection to mock-client closed (unmasked frame)",
+        }),
+        diagnosticMessages
+    );
+}
+
+TEST_F(WebSocketTests, ViolationServerShouldNotMaskFrames) {
+    const auto connection = std::make_shared< MockConnection >();
+    ws.Open(connection, WebSockets::WebSocket::Role::Client);
+    unsigned int codeReceived;
+    std::string reasonReceived;
+    bool closeReceived = false;
+    ws.SetCloseDelegate(
+        [&codeReceived, &reasonReceived, &closeReceived](
+            unsigned int code,
+            const std::string& reason
+        ){
+            codeReceived = code;
+            reasonReceived = reason;
+            closeReceived = true;
+        }
+    );
+    std::string frame = "\x89\x80XXXX";
+    connection->dataReceivedDelegate({frame.begin(), frame.end()});
+    const std::string data = "\x03\xeamasked frame";
+    ASSERT_EQ(data.length() + 6, connection->webSocketOutput.length());
+    ASSERT_EQ("\x88\x8E", connection->webSocketOutput.substr(0, 2));
+    for (size_t i = 0; i < data.length(); ++i) {
+        ASSERT_EQ(
+            data[i] ^ connection->webSocketOutput[2 + (i % 4)],
+            connection->webSocketOutput[6 + i]
+        );
+    }
+    ASSERT_TRUE(connection->brokenByWebSocket);
+    ASSERT_TRUE(closeReceived);
+    EXPECT_EQ(1002, codeReceived);
+    EXPECT_EQ("masked frame", reasonReceived);
+    ASSERT_EQ(
+        (std::vector< std::string >{
+            "WebSockets::WebSocket[1]: Connection to mock-client closed (masked frame)",
+        }),
+        diagnosticMessages
+    );
+}
+
 TEST_F(WebSocketTests, ConnectionUnexpectedlyBroken) {
     const auto connection = std::make_shared< MockConnection >();
     ws.Open(connection, WebSockets::WebSocket::Role::Server);
