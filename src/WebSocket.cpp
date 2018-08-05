@@ -675,14 +675,7 @@ namespace WebSockets {
         if (response.statusCode != 101) {
             return false;
         }
-        bool foundUpgradeToken = false;
-        for (const auto token: response.headers.GetHeaderTokens("Connection")) {
-            if (token == "upgrade") {
-                foundUpgradeToken = true;
-                break;
-            }
-        }
-        if (!foundUpgradeToken) {
+        if (!response.headers.HasHeaderToken("Connection", "upgrade")) {
             return false;
         }
         if (SystemAbstractions::ToLower(response.headers.GetHeaderValue("Upgrade")) != "websocket") {
@@ -713,14 +706,7 @@ namespace WebSockets {
         if (request.headers.GetHeaderValue("Sec-WebSocket-Version") != CURRENTLY_SUPPORTED_WEBSOCKET_VERSION) {
             return false;
         }
-        bool foundUpgradeToken = false;
-        for (const auto token: request.headers.GetHeaderTokens("Connection")) {
-            if (token == "upgrade") {
-                foundUpgradeToken = true;
-                break;
-            }
-        }
-        if (!foundUpgradeToken) {
+        if (!request.headers.HasHeaderToken("Connection", "upgrade")) {
             return false;
         }
         if (SystemAbstractions::ToLower(request.headers.GetHeaderValue("Upgrade")) != "websocket") {

@@ -159,14 +159,7 @@ TEST_F(WebSocketTests, InitiateOpenAsClient) {
         "websocket",
         SystemAbstractions::ToLower(request.headers.GetHeaderValue("Upgrade"))
     );
-    bool foundUpgradeToken = false;
-    for (const auto token: request.headers.GetHeaderTokens("Connection")) {
-        if (token == "upgrade") {
-            foundUpgradeToken = true;
-            break;
-        }
-    }
-    EXPECT_TRUE(foundUpgradeToken);
+    EXPECT_TRUE(request.headers.HasHeaderToken("Connection", "upgrade"));
 }
 
 TEST_F(WebSocketTests, FailCompleteOpenAsClientDueToMissingUpgrade) {
@@ -489,14 +482,7 @@ TEST_F(WebSocketTests, CompleteOpenAsServer) {
         "websocket",
         SystemAbstractions::ToLower(response.headers.GetHeaderValue("Upgrade"))
     );
-    bool foundUpgradeToken = false;
-    for (const auto token: response.headers.GetHeaderTokens("Connection")) {
-        if (token == "upgrade") {
-            foundUpgradeToken = true;
-            break;
-        }
-    }
-    EXPECT_TRUE(foundUpgradeToken);
+    EXPECT_TRUE(request.headers.HasHeaderToken("Connection", "upgrade"));
     EXPECT_EQ(
         "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=",
         response.headers.GetHeaderValue("Sec-WebSocket-Accept")
