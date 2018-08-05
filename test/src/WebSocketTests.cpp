@@ -109,17 +109,29 @@ struct WebSocketTests
     std::vector< std::string > diagnosticMessages;
 
     /**
-     * This is the subscription token obtained when subscribing
+     * This is the delegate obtained when subscribing
      * to receive diagnostic messages from the unit under test.
+     * It's called to terminate the subscription.
      */
-    SystemAbstractions::DiagnosticsSender::SubscriptionToken diagnosticsSubscription;
+    SystemAbstractions::DiagnosticsSender::UnsubscribeDelegate diagnosticsUnsubscribeDelegate;
 
     // Methods
+
+    /**
+     * This method cleanly destroys the old WebSocket and sets up
+     * a new one that works in this test fixture.
+     */
+    void ReplaceWebSocket() {
+        TearDown();
+        ws = WebSockets::WebSocket();
+        wsWasMoved = false;
+        SetUp();
+    }
 
     // ::testing::Test
 
     virtual void SetUp() {
-        diagnosticsSubscription = ws.SubscribeToDiagnostics(
+        diagnosticsUnsubscribeDelegate = ws.SubscribeToDiagnostics(
             [this](
                 std::string senderName,
                 size_t level,
@@ -140,7 +152,7 @@ struct WebSocketTests
 
     virtual void TearDown() {
         if (!wsWasMoved) {
-            ws.UnsubscribeFromDiagnostics(diagnosticsSubscription);
+            diagnosticsUnsubscribeDelegate();
         }
     }
 };
@@ -403,7 +415,7 @@ TEST_F(WebSocketTests, SucceedCompleteOpenAsClientBlankProtocol) {
             response
         )
     );
-    ws = WebSockets::WebSocket();
+    ReplaceWebSocket();
     ws.StartOpenAsClient(request);
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",

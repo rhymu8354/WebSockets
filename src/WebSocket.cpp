@@ -641,15 +641,11 @@ namespace WebSockets {
     {
     }
 
-    SystemAbstractions::DiagnosticsSender::SubscriptionToken WebSocket::SubscribeToDiagnostics(
+    SystemAbstractions::DiagnosticsSender::UnsubscribeDelegate WebSocket::SubscribeToDiagnostics(
         SystemAbstractions::DiagnosticsSender::DiagnosticMessageDelegate delegate,
         size_t minLevel
     ) {
         return impl_->diagnosticsSender.SubscribeToDiagnostics(delegate, minLevel);
-    }
-
-    void WebSocket::UnsubscribeFromDiagnostics(SystemAbstractions::DiagnosticsSender::SubscriptionToken subscriptionToken) {
-        impl_->diagnosticsSender.UnsubscribeFromDiagnostics(subscriptionToken);
     }
 
     void WebSocket::StartOpenAsClient(
