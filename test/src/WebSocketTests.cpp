@@ -22,25 +22,6 @@
 namespace {
 
     /**
-     * This function takes a string and swaps all upper-case characters
-     * with their lower-case equivalents, returning the result.
-     *
-     * @param[in] inString
-     *     This is the string to be normalized.
-     *
-     * @return
-     *     The normalized string is returned.  All upper-case characters
-     *     are replaced with their lower-case equivalents.
-     */
-    std::string NormalizeCaseInsensitiveString(const std::string& inString) {
-        std::string outString;
-        for (char c: inString) {
-            outString.push_back(tolower(c));
-        }
-        return outString;
-    }
-
-    /**
      * This is a fake client connection which is used to test WebSockets.
      */
     struct MockConnection
@@ -176,7 +157,7 @@ TEST_F(WebSocketTests, InitiateOpenAsClient) {
     );
     EXPECT_EQ(
         "websocket",
-        NormalizeCaseInsensitiveString(request.headers.GetHeaderValue("Upgrade"))
+        SystemAbstractions::ToLower(request.headers.GetHeaderValue("Upgrade"))
     );
     bool foundUpgradeToken = false;
     for (const auto token: request.headers.GetHeaderTokens("Connection")) {
@@ -506,7 +487,7 @@ TEST_F(WebSocketTests, CompleteOpenAsServer) {
     EXPECT_EQ("Switching Protocols", response.reasonPhrase);
     EXPECT_EQ(
         "websocket",
-        NormalizeCaseInsensitiveString(response.headers.GetHeaderValue("Upgrade"))
+        SystemAbstractions::ToLower(response.headers.GetHeaderValue("Upgrade"))
     );
     bool foundUpgradeToken = false;
     for (const auto token: response.headers.GetHeaderTokens("Connection")) {

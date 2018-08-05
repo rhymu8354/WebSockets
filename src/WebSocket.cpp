@@ -12,6 +12,7 @@
 #include <stdint.h>
 #include <SystemAbstractions/CryptoRandom.hpp>
 #include <SystemAbstractions/DiagnosticsSender.hpp>
+#include <SystemAbstractions/StringExtensions.hpp>
 #include <Utf8/Utf8.hpp>
 #include <vector>
 #include <WebSockets/WebSocket.hpp>
@@ -105,25 +106,6 @@ namespace {
          */
         Binary,
     };
-
-    /**
-     * This function takes a string and swaps all upper-case characters
-     * with their lower-case equivalents, returning the result.
-     *
-     * @param[in] inString
-     *     This is the string to be normalized.
-     *
-     * @return
-     *     The normalized string is returned.  All upper-case characters
-     *     are replaced with their lower-case equivalents.
-     */
-    std::string NormalizeCaseInsensitiveString(const std::string& inString) {
-        std::string outString;
-        for (char c: inString) {
-            outString.push_back(tolower(c));
-        }
-        return outString;
-    }
 
     /**
      * This function computes the value of the "Sec-WebSocket-Accept"
@@ -703,7 +685,7 @@ namespace WebSockets {
         if (!foundUpgradeToken) {
             return false;
         }
-        if (NormalizeCaseInsensitiveString(response.headers.GetHeaderValue("Upgrade")) != "websocket") {
+        if (SystemAbstractions::ToLower(response.headers.GetHeaderValue("Upgrade")) != "websocket") {
             return false;
         }
         if (response.headers.GetHeaderValue("Sec-WebSocket-Accept") != ComputeKeyAnswer(impl_->key)) {
@@ -741,7 +723,7 @@ namespace WebSockets {
         if (!foundUpgradeToken) {
             return false;
         }
-        if (NormalizeCaseInsensitiveString(request.headers.GetHeaderValue("Upgrade")) != "websocket") {
+        if (SystemAbstractions::ToLower(request.headers.GetHeaderValue("Upgrade")) != "websocket") {
             return false;
         }
         impl_->key = request.headers.GetHeaderValue("Sec-WebSocket-Key");
