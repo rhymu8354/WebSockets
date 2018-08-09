@@ -74,11 +74,11 @@ namespace WebSockets {
 
         // Lifecycle management
     public:
-        ~WebSocket();
+        ~WebSocket() noexcept;
         WebSocket(const WebSocket&) = delete;
-        WebSocket(WebSocket&&);
+        WebSocket(WebSocket&&) noexcept;
         WebSocket& operator=(const WebSocket&) = delete;
-        WebSocket& operator=(WebSocket&&);
+        WebSocket& operator=(WebSocket&&) noexcept;
 
         // Public methods
     public:

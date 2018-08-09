@@ -625,7 +625,7 @@ namespace WebSockets {
         }
     };
 
-    WebSocket::~WebSocket() {
+    WebSocket::~WebSocket() noexcept {
         if (impl_) {
             if (impl_->connection != nullptr) {
                 impl_->connection->SetDataReceivedDelegate(nullptr);
@@ -633,8 +633,8 @@ namespace WebSockets {
             }
         }
     }
-    WebSocket::WebSocket(WebSocket&&) = default;
-    WebSocket& WebSocket::operator=(WebSocket&&) = default;
+    WebSocket::WebSocket(WebSocket&&) noexcept = default;
+    WebSocket& WebSocket::operator=(WebSocket&&) noexcept = default;
 
     WebSocket::WebSocket()
         : impl_(new Impl)
