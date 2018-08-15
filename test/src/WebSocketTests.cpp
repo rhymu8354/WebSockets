@@ -1411,7 +1411,7 @@ TEST_F(WebSocketTests, ConnectionUnexpectedlyBroken) {
             closeReceived = true;
         }
     );
-    connection->brokenDelegate();
+    connection->brokenDelegate(false);
     ASSERT_TRUE(connection->brokenByWebSocket);
     ASSERT_TRUE(closeReceived);
     EXPECT_EQ(1006, codeReceived);

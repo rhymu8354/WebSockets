@@ -749,7 +749,7 @@ namespace WebSockets {
             }
         );
         impl_->connection->SetBrokenDelegate(
-            [implWeak]{
+            [implWeak](bool){
                 const auto impl = implWeak.lock();
                 if (impl) {
                     impl->ConnectionBroken();
