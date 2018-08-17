@@ -630,6 +630,7 @@ namespace WebSockets {
             if (impl_->connection != nullptr) {
                 impl_->connection->SetDataReceivedDelegate(nullptr);
                 impl_->connection->SetBrokenDelegate(nullptr);
+                impl_->connection->Break(false);
             }
         }
     }
