@@ -55,8 +55,12 @@ namespace {
 
         // Http::Connection
 
-        virtual std::string GetPeerId() override {
+        virtual std::string GetPeerAddress() override {
             return "mock-client";
+        }
+
+        virtual std::string GetPeerId() override {
+            return "mock-client:5555";
         }
 
         virtual void SetDataReceivedDelegate(DataReceivedDelegate newDataReceivedDelegate) override {
@@ -1165,7 +1169,7 @@ TEST_F(WebSocketTests, ReceiveClose) {
     EXPECT_EQ("", reasonReceived);
     ASSERT_EQ(
         (std::vector< std::string >{
-            "WebSockets::WebSocket[1]: Connection to mock-client closed by peer",
+            "WebSockets::WebSocket[1]: Connection to mock-client:5555 closed by peer",
         }),
         diagnosticMessages
     );
@@ -1181,7 +1185,7 @@ TEST_F(WebSocketTests, ReceiveClose) {
     ASSERT_TRUE(connection->brokenByWebSocket);
     ASSERT_EQ(
         (std::vector< std::string >{
-            "WebSockets::WebSocket[1]: Connection to mock-client closed ()",
+            "WebSockets::WebSocket[1]: Connection to mock-client:5555 closed ()",
         }),
         diagnosticMessages
     );
@@ -1319,7 +1323,7 @@ TEST_F(WebSocketTests, ViolationUnknownOpcode) {
     EXPECT_EQ("unknown opcode", reasonReceived);
     ASSERT_EQ(
         (std::vector< std::string >{
-            "WebSockets::WebSocket[1]: Connection to mock-client closed (unknown opcode)",
+            "WebSockets::WebSocket[1]: Connection to mock-client:5555 closed (unknown opcode)",
         }),
         diagnosticMessages
     );
@@ -1350,7 +1354,7 @@ TEST_F(WebSocketTests, ViolationClientShouldMaskFrames) {
     EXPECT_EQ("unmasked frame", reasonReceived);
     ASSERT_EQ(
         (std::vector< std::string >{
-            "WebSockets::WebSocket[1]: Connection to mock-client closed (unmasked frame)",
+            "WebSockets::WebSocket[1]: Connection to mock-client:5555 closed (unmasked frame)",
         }),
         diagnosticMessages
     );
@@ -1389,7 +1393,7 @@ TEST_F(WebSocketTests, ViolationServerShouldNotMaskFrames) {
     EXPECT_EQ("masked frame", reasonReceived);
     ASSERT_EQ(
         (std::vector< std::string >{
-            "WebSockets::WebSocket[1]: Connection to mock-client closed (masked frame)",
+            "WebSockets::WebSocket[1]: Connection to mock-client:5555 closed (masked frame)",
         }),
         diagnosticMessages
     );
@@ -1418,7 +1422,7 @@ TEST_F(WebSocketTests, ConnectionUnexpectedlyBroken) {
     EXPECT_EQ("connection broken by peer", reasonReceived);
     ASSERT_EQ(
         (std::vector< std::string >{
-            "WebSockets::WebSocket[1]: Connection to mock-client broken by peer",
+            "WebSockets::WebSocket[1]: Connection to mock-client:5555 broken by peer",
         }),
         diagnosticMessages
     );
