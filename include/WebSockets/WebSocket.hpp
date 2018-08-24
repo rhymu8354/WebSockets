@@ -318,7 +318,7 @@ namespace WebSockets {
         /**
          * This contains the private properties of the instance.
          */
-        std::shared_ptr< struct Impl > impl_;
+        std::shared_ptr< Impl > impl_;
     };
 
 }
