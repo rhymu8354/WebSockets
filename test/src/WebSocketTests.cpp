@@ -169,7 +169,7 @@ TEST_F(WebSocketTests, InitiateOpenAsClient) {
     const auto key = request.headers.GetHeaderValue("Sec-WebSocket-Key");
     EXPECT_EQ(
         key,
-        Base64::Base64Encode(Base64::Base64Decode(key))
+        Base64::Encode(Base64::Decode(key))
     );
     EXPECT_EQ(
         "websocket",
@@ -186,7 +186,7 @@ TEST_F(WebSocketTests, FailCompleteOpenAsClientDueToMissingUpgrade) {
     response.headers.SetHeader("Connection", "upgrade");
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
-        Base64::Base64Encode(
+        Base64::Encode(
             Sha1::Sha1Bytes(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -211,7 +211,7 @@ TEST_F(WebSocketTests, FailCompleteOpenAsClientDueToWrongUpgrade) {
     response.headers.SetHeader("Upgrade", "foobar");
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
-        Base64::Base64Encode(
+        Base64::Encode(
             Sha1::Sha1Bytes(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -235,7 +235,7 @@ TEST_F(WebSocketTests, FailCompleteOpenAsClientDueToMissingConnection) {
     response.headers.SetHeader("Upgrade", "websocket");
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
-        Base64::Base64Encode(
+        Base64::Encode(
             Sha1::Sha1Bytes(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -260,7 +260,7 @@ TEST_F(WebSocketTests, FailCompleteOpenAsClientDueToWrongConnection) {
     response.headers.SetHeader("Upgrade", "websocket");
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
-        Base64::Base64Encode(
+        Base64::Encode(
             Sha1::Sha1Bytes(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -301,7 +301,7 @@ TEST_F(WebSocketTests, FailCompleteOpenAsClientDueToWrongAccept) {
     response.headers.SetHeader("Upgrade", "websocket");
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
-        Base64::Base64Encode(
+        Base64::Encode(
             Sha1::Sha1Bytes(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B12"
@@ -326,7 +326,7 @@ TEST_F(WebSocketTests, FailCompleteOpenAsClientDueToUnsupportedExtension) {
     response.headers.SetHeader("Upgrade", "websocket");
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
-        Base64::Base64Encode(
+        Base64::Encode(
             Sha1::Sha1Bytes(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -352,7 +352,7 @@ TEST_F(WebSocketTests, SucceedCompleteOpenAsClientBlankExtensions) {
     response.headers.SetHeader("Upgrade", "websocket");
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
-        Base64::Base64Encode(
+        Base64::Encode(
             Sha1::Sha1Bytes(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -378,7 +378,7 @@ TEST_F(WebSocketTests, FailCompleteOpenAsClientDueToUnsupportedProtocol) {
     response.headers.SetHeader("Upgrade", "websocket");
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
-        Base64::Base64Encode(
+        Base64::Encode(
             Sha1::Sha1Bytes(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -404,7 +404,7 @@ TEST_F(WebSocketTests, SucceedCompleteOpenAsClientBlankProtocol) {
     response.headers.SetHeader("Upgrade", "websocket");
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
-        Base64::Base64Encode(
+        Base64::Encode(
             Sha1::Sha1Bytes(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -423,7 +423,7 @@ TEST_F(WebSocketTests, SucceedCompleteOpenAsClientBlankProtocol) {
     ws.StartOpenAsClient(request);
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
-        Base64::Base64Encode(
+        Base64::Encode(
             Sha1::Sha1Bytes(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -448,7 +448,7 @@ TEST_F(WebSocketTests, CompleteOpenAsClient) {
     response.headers.SetHeader("Upgrade", "websocket");
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
-        Base64::Base64Encode(
+        Base64::Encode(
             Sha1::Sha1Bytes(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -513,7 +513,7 @@ TEST_F(WebSocketTests, CompleteOpenAsServerConnectionTokenCapitalized) {
     request.headers.SetHeader("Connection", "Upgrade");
     request.headers.SetHeader("Upgrade", "websocket");
     request.headers.SetHeader("Sec-WebSocket-Version", "13");
-    const std::string key = Base64::Base64Encode("abcdefghijklmnop");
+    const std::string key = Base64::Encode("abcdefghijklmnop");
     request.headers.SetHeader("Sec-WebSocket-Key", key);
     Http::Response response;
     const auto connection = std::make_shared< MockConnection >();
@@ -533,7 +533,7 @@ TEST_F(WebSocketTests, CompleteOpenAsServerWithTrailer) {
     request.headers.SetHeader("Connection", "upgrade");
     request.headers.SetHeader("Upgrade", "websocket");
     request.headers.SetHeader("Sec-WebSocket-Version", "13");
-    const std::string key = Base64::Base64Encode("abcdefghijklmnop");
+    const std::string key = Base64::Encode("abcdefghijklmnop");
     request.headers.SetHeader("Sec-WebSocket-Key", key);
     Http::Response response;
     const auto connection = std::make_shared< MockConnection >();
@@ -569,7 +569,7 @@ TEST_F(WebSocketTests, FailCompleteOpenAsServerNotGetMethod) {
     request.headers.SetHeader("Connection", "upgrade");
     request.headers.SetHeader("Upgrade", "websocket");
     request.headers.SetHeader("Sec-WebSocket-Version", "13");
-    const std::string key = Base64::Base64Encode("abcdefghijklmnop");
+    const std::string key = Base64::Encode("abcdefghijklmnop");
     request.headers.SetHeader("Sec-WebSocket-Key", key);
     Http::Response response;
     const auto connection = std::make_shared< MockConnection >();
@@ -588,7 +588,7 @@ TEST_F(WebSocketTests, FailCompleteOpenAsServerMissingUpgrade) {
     request.method = "GET";
     request.headers.SetHeader("Connection", "upgrade");
     request.headers.SetHeader("Sec-WebSocket-Version", "13");
-    const std::string key = Base64::Base64Encode("abcdefghijklmnop");
+    const std::string key = Base64::Encode("abcdefghijklmnop");
     request.headers.SetHeader("Sec-WebSocket-Key", key);
     Http::Response response;
     const auto connection = std::make_shared< MockConnection >();
@@ -608,7 +608,7 @@ TEST_F(WebSocketTests, FailCompleteOpenAsServerWrongUpgrade) {
     request.headers.SetHeader("Connection", "upgrade");
     request.headers.SetHeader("Upgrade", "foobar");
     request.headers.SetHeader("Sec-WebSocket-Version", "13");
-    const std::string key = Base64::Base64Encode("abcdefghijklmnop");
+    const std::string key = Base64::Encode("abcdefghijklmnop");
     request.headers.SetHeader("Sec-WebSocket-Key", key);
     Http::Response response;
     const auto connection = std::make_shared< MockConnection >();
@@ -627,7 +627,7 @@ TEST_F(WebSocketTests, FailCompleteOpenAsServerMissingConnection) {
     request.method = "GET";
     request.headers.SetHeader("Upgrade", "websocket");
     request.headers.SetHeader("Sec-WebSocket-Version", "13");
-    const std::string key = Base64::Base64Encode("abcdefghijklmnop");
+    const std::string key = Base64::Encode("abcdefghijklmnop");
     request.headers.SetHeader("Sec-WebSocket-Key", key);
     Http::Response response;
     const auto connection = std::make_shared< MockConnection >();
@@ -647,7 +647,7 @@ TEST_F(WebSocketTests, FailCompleteOpenAsServerWrongConnection) {
     request.headers.SetHeader("Connection", "foobar");
     request.headers.SetHeader("Upgrade", "websocket");
     request.headers.SetHeader("Sec-WebSocket-Version", "13");
-    const std::string key = Base64::Base64Encode("abcdefghijklmnop");
+    const std::string key = Base64::Encode("abcdefghijklmnop");
     request.headers.SetHeader("Sec-WebSocket-Key", key);
     Http::Response response;
     const auto connection = std::make_shared< MockConnection >();
@@ -685,7 +685,7 @@ TEST_F(WebSocketTests, FailCompleteOpenAsServerBadKey) {
     request.headers.SetHeader("Connection", "upgrade");
     request.headers.SetHeader("Upgrade", "websocket");
     request.headers.SetHeader("Sec-WebSocket-Version", "13");
-    std::string key = Base64::Base64Encode("abcdefghijklmno");
+    std::string key = Base64::Encode("abcdefghijklmno");
     request.headers.SetHeader("Sec-WebSocket-Key", key);
     Http::Response response;
     const auto connection = std::make_shared< MockConnection >();
@@ -697,7 +697,7 @@ TEST_F(WebSocketTests, FailCompleteOpenAsServerBadKey) {
             ""
         )
     );
-    key = Base64::Base64Encode("abcdefghijklmnopq");
+    key = Base64::Encode("abcdefghijklmnopq");
     request.headers.SetHeader("Sec-WebSocket-Key", key);
     ASSERT_FALSE(
         ws.OpenAsServer(
@@ -707,7 +707,7 @@ TEST_F(WebSocketTests, FailCompleteOpenAsServerBadKey) {
             ""
         )
     );
-    key = Base64::Base64Encode("abcdefghijklmnop");
+    key = Base64::Encode("abcdefghijklmnop");
     request.headers.SetHeader("Sec-WebSocket-Key", key);
     ASSERT_TRUE(
         ws.OpenAsServer(
@@ -724,7 +724,7 @@ TEST_F(WebSocketTests, FailCompleteOpenAsServerMissingVersion) {
     request.method = "GET";
     request.headers.SetHeader("Connection", "upgrade");
     request.headers.SetHeader("Upgrade", "websocket");
-    const std::string key = Base64::Base64Encode("abcdefghijklmnop");
+    const std::string key = Base64::Encode("abcdefghijklmnop");
     request.headers.SetHeader("Sec-WebSocket-Key", key);
     Http::Response response;
     const auto connection = std::make_shared< MockConnection >();
@@ -744,7 +744,7 @@ TEST_F(WebSocketTests, FailCompleteOpenAsServerBadVersion) {
     request.headers.SetHeader("Connection", "upgrade");
     request.headers.SetHeader("Upgrade", "websocket");
     request.headers.SetHeader("Sec-WebSocket-Version", "12");
-    const std::string key = Base64::Base64Encode("abcdefghijklmnop");
+    const std::string key = Base64::Encode("abcdefghijklmnop");
     request.headers.SetHeader("Sec-WebSocket-Key", key);
     Http::Response response;
     const auto connection = std::make_shared< MockConnection >();

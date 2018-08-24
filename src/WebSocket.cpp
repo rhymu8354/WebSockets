@@ -119,7 +119,7 @@ namespace {
      *     The answer computed from the given key is returned.
      */
     std::string ComputeKeyAnswer(const std::string& key) {
-        return Base64::Base64Encode(
+        return Base64::Encode(
             Sha1::Sha1Bytes(key + WEBSOCKET_KEY_SALT)
         );
     }
@@ -655,7 +655,7 @@ namespace WebSockets {
         request.headers.SetHeader("Sec-WebSocket-Version", CURRENTLY_SUPPORTED_WEBSOCKET_VERSION);
         char nonce[16];
         impl_->rng.Generate(nonce, sizeof(nonce));
-        impl_->key = Base64::Base64Encode(
+        impl_->key = Base64::Encode(
             std::string(nonce, sizeof(nonce))
         );
         request.headers.SetHeader("Sec-WebSocket-Key", impl_->key);
@@ -710,7 +710,7 @@ namespace WebSockets {
             return false;
         }
         impl_->key = request.headers.GetHeaderValue("Sec-WebSocket-Key");
-        if (Base64::Base64Decode(impl_->key).length() != REQUIRED_WEBSOCKET_KEY_LENGTH) {
+        if (Base64::Decode(impl_->key).length() != REQUIRED_WEBSOCKET_KEY_LENGTH) {
             return false;
         }
         auto connectionTokens = response.headers.GetHeaderMultiValue("Connection");
