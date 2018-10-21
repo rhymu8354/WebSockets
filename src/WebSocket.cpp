@@ -660,7 +660,7 @@ namespace WebSockets {
         );
         request.headers.SetHeader("Sec-WebSocket-Key", impl_->key);
         request.headers.SetHeader("Upgrade", "websocket");
-        auto connectionTokens = request.headers.GetHeaderMultiValue("Connection");
+        auto connectionTokens = request.headers.GetHeaderTokens("Connection");
         connectionTokens.push_back("upgrade");
         request.headers.SetHeader("Connection", connectionTokens, true);
     }
@@ -713,7 +713,7 @@ namespace WebSockets {
         if (Base64::Decode(impl_->key).length() != REQUIRED_WEBSOCKET_KEY_LENGTH) {
             return false;
         }
-        auto connectionTokens = response.headers.GetHeaderMultiValue("Connection");
+        auto connectionTokens = response.headers.GetHeaderTokens("Connection");
         connectionTokens.push_back("upgrade");
         response.statusCode = 101;
         response.reasonPhrase = "Switching Protocols";
