@@ -8,7 +8,8 @@
 
 #include <Base64/Base64.hpp>
 #include <mutex>
-#include <Sha1/Sha1.hpp>
+#include <Hash/Sha1.hpp>
+#include <Hash/Templates.hpp>
 #include <stdint.h>
 #include <SystemAbstractions/CryptoRandom.hpp>
 #include <SystemAbstractions/DiagnosticsSender.hpp>
@@ -120,7 +121,7 @@ namespace {
      */
     std::string ComputeKeyAnswer(const std::string& key) {
         return Base64::Encode(
-            Sha1::Sha1Bytes(key + WEBSOCKET_KEY_SALT)
+            Hash::StringToBytes< Hash::Sha1 >(key + WEBSOCKET_KEY_SALT)
         );
     }
 

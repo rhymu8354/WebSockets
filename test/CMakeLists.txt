@@ -19,8 +19,8 @@ target_include_directories(${This} PRIVATE ..)
 target_link_libraries(${This} PUBLIC
     Base64
     gtest_main
+    Hash
     Http
-    Sha1
     SystemAbstractions
     WebSockets
 )

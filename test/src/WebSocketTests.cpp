@@ -11,7 +11,8 @@
 #include <gtest/gtest.h>
 #include <Http/Connection.hpp>
 #include <memory>
-#include <Sha1/Sha1.hpp>
+#include <Hash/Sha1.hpp>
+#include <Hash/Templates.hpp>
 #include <stddef.h>
 #include <string>
 #include <SystemAbstractions/DiagnosticsSender.hpp>
@@ -187,7 +188,7 @@ TEST_F(WebSocketTests, FailCompleteOpenAsClientDueToMissingUpgrade) {
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
         Base64::Encode(
-            Sha1::Sha1Bytes(
+            Hash::StringToBytes< Hash::Sha1 >(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
             )
@@ -212,7 +213,7 @@ TEST_F(WebSocketTests, FailCompleteOpenAsClientDueToWrongUpgrade) {
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
         Base64::Encode(
-            Sha1::Sha1Bytes(
+            Hash::StringToBytes< Hash::Sha1 >(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
             )
@@ -236,7 +237,7 @@ TEST_F(WebSocketTests, FailCompleteOpenAsClientDueToMissingConnection) {
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
         Base64::Encode(
-            Sha1::Sha1Bytes(
+            Hash::StringToBytes< Hash::Sha1 >(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
             )
@@ -261,7 +262,7 @@ TEST_F(WebSocketTests, FailCompleteOpenAsClientDueToWrongConnection) {
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
         Base64::Encode(
-            Sha1::Sha1Bytes(
+            Hash::StringToBytes< Hash::Sha1 >(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
             )
@@ -302,7 +303,7 @@ TEST_F(WebSocketTests, FailCompleteOpenAsClientDueToWrongAccept) {
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
         Base64::Encode(
-            Sha1::Sha1Bytes(
+            Hash::StringToBytes< Hash::Sha1 >(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B12"
             )
@@ -327,7 +328,7 @@ TEST_F(WebSocketTests, FailCompleteOpenAsClientDueToUnsupportedExtension) {
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
         Base64::Encode(
-            Sha1::Sha1Bytes(
+            Hash::StringToBytes< Hash::Sha1 >(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
             )
@@ -353,7 +354,7 @@ TEST_F(WebSocketTests, SucceedCompleteOpenAsClientBlankExtensions) {
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
         Base64::Encode(
-            Sha1::Sha1Bytes(
+            Hash::StringToBytes< Hash::Sha1 >(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
             )
@@ -379,7 +380,7 @@ TEST_F(WebSocketTests, FailCompleteOpenAsClientDueToUnsupportedProtocol) {
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
         Base64::Encode(
-            Sha1::Sha1Bytes(
+            Hash::StringToBytes< Hash::Sha1 >(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
             )
@@ -405,7 +406,7 @@ TEST_F(WebSocketTests, SucceedCompleteOpenAsClientBlankProtocol) {
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
         Base64::Encode(
-            Sha1::Sha1Bytes(
+            Hash::StringToBytes< Hash::Sha1 >(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
             )
@@ -424,7 +425,7 @@ TEST_F(WebSocketTests, SucceedCompleteOpenAsClientBlankProtocol) {
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
         Base64::Encode(
-            Sha1::Sha1Bytes(
+            Hash::StringToBytes< Hash::Sha1 >(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
             )
@@ -449,7 +450,7 @@ TEST_F(WebSocketTests, CompleteOpenAsClient) {
     response.headers.SetHeader(
         "Sec-WebSocket-Accept",
         Base64::Encode(
-            Sha1::Sha1Bytes(
+            Hash::StringToBytes< Hash::Sha1 >(
                 request.headers.GetHeaderValue("Sec-WebSocket-Key")
                 + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
             )
