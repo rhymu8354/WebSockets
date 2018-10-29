@@ -558,6 +558,9 @@ namespace WebSockets {
             const std::vector< uint8_t >& data
         ) {
             std::lock_guard< decltype(mutex) > lock(mutex);
+            if (connection == nullptr) {
+                return;
+            }
             (void)frameReassemblyBuffer.insert(
                 frameReassemblyBuffer.end(),
                 data.begin(),
@@ -617,6 +620,9 @@ namespace WebSockets {
          */
         void ConnectionBroken() {
             std::lock_guard< decltype(mutex) > lock(mutex);
+            if (connection == nullptr) {
+                return;
+            }
             Close(1006, "connection broken by peer", true);
             diagnosticsSender.SendDiagnosticInformationFormatted(
                 1,
@@ -627,12 +633,16 @@ namespace WebSockets {
     };
 
     WebSocket::~WebSocket() noexcept {
-        if (impl_) {
-            if (impl_->connection != nullptr) {
-                impl_->connection->SetDataReceivedDelegate(nullptr);
-                impl_->connection->SetBrokenDelegate(nullptr);
-                impl_->connection->Break(false);
-            }
+        std::unique_lock< decltype(impl_->mutex) > lock(impl_->mutex);
+        if (impl_->connection != nullptr) {
+            impl_->connection->SetDataReceivedDelegate(nullptr);
+            impl_->connection->SetBrokenDelegate(nullptr);
+            impl_->connection->Break(false);
+            auto connection = impl_->connection;
+            impl_->connection = nullptr;
+            lock.unlock();
+            connection = nullptr;
+            lock.lock();
         }
     }
     WebSocket::WebSocket(WebSocket&&) noexcept = default;
@@ -765,11 +775,17 @@ namespace WebSockets {
         const std::string reason
     ) {
         std::lock_guard< decltype(impl_->mutex) > lock(impl_->mutex);
+        if (impl_->connection == nullptr) {
+            return;
+        }
         impl_->Close(code, reason);
     }
 
     void WebSocket::Ping(const std::string& data) {
         std::lock_guard< decltype(impl_->mutex) > lock(impl_->mutex);
+        if (impl_->connection == nullptr) {
+            return;
+        }
         if (impl_->closeSent) {
             return;
         }
@@ -781,6 +797,9 @@ namespace WebSockets {
 
     void WebSocket::Pong(const std::string& data) {
         std::lock_guard< decltype(impl_->mutex) > lock(impl_->mutex);
+        if (impl_->connection == nullptr) {
+            return;
+        }
         if (impl_->closeSent) {
             return;
         }
@@ -795,6 +814,9 @@ namespace WebSockets {
         bool lastFragment
     ) {
         std::lock_guard< decltype(impl_->mutex) > lock(impl_->mutex);
+        if (impl_->connection == nullptr) {
+            return;
+        }
         if (impl_->closeSent) {
             return;
         }
@@ -819,6 +841,9 @@ namespace WebSockets {
         bool lastFragment
     ) {
         std::lock_guard< decltype(impl_->mutex) > lock(impl_->mutex);
+        if (impl_->connection == nullptr) {
+            return;
+        }
         if (impl_->closeSent) {
             return;
         }
