@@ -633,6 +633,9 @@ namespace WebSockets {
     };
 
     WebSocket::~WebSocket() noexcept {
+        if (impl_ == nullptr) {
+            return;
+        }
         std::unique_lock< decltype(impl_->mutex) > lock(impl_->mutex);
         if (impl_->connection != nullptr) {
             impl_->connection->SetDataReceivedDelegate(nullptr);
