@@ -528,42 +528,6 @@ TEST_F(WebSocketTests, CompleteOpenAsServerConnectionTokenCapitalized) {
     );
 }
 
-TEST_F(WebSocketTests, CompleteOpenAsServerWithTrailer) {
-    Http::Request request;
-    request.method = "GET";
-    request.headers.SetHeader("Connection", "upgrade");
-    request.headers.SetHeader("Upgrade", "websocket");
-    request.headers.SetHeader("Sec-WebSocket-Version", "13");
-    const std::string key = Base64::Encode("abcdefghijklmnop");
-    request.headers.SetHeader("Sec-WebSocket-Key", key);
-    Http::Response response;
-    const auto connection = std::make_shared< MockConnection >();
-    std::vector< std::string > pongs;
-    ws.SetPongDelegate(
-        [&pongs](
-            const std::string& data
-        ){
-            pongs.push_back(data);
-        }
-    );
-    ASSERT_TRUE(
-        ws.OpenAsServer(
-            connection,
-            request,
-            response,
-            "\x8A"
-        )
-    );
-    EXPECT_TRUE(pongs.empty());
-    connection->dataReceivedDelegate({ 0x80, 0x12, 0x34, 0x56, 0x78 });
-    ASSERT_EQ(
-        (std::vector< std::string >{
-            "",
-        }),
-        pongs
-    );
-}
-
 TEST_F(WebSocketTests, FailCompleteOpenAsServerNotGetMethod) {
     Http::Request request;
     request.method = "POST";
@@ -775,6 +739,36 @@ TEST_F(WebSocketTests, FailCompleteOpenAsServerBadVersion) {
             ""
         )
     );
+}
+
+TEST_F(WebSocketTests, FailCompleteOpenAsServerWhenTrailerNotEmpty) {
+    Http::Request request;
+    request.method = "GET";
+    request.headers.SetHeader("Connection", "upgrade");
+    request.headers.SetHeader("Upgrade", "websocket");
+    request.headers.SetHeader("Sec-WebSocket-Version", "13");
+    const std::string key = Base64::Encode("abcdefghijklmnop");
+    request.headers.SetHeader("Sec-WebSocket-Key", key);
+    Http::Response response;
+    const auto connection = std::make_shared< MockConnection >();
+    std::vector< std::string > pongs;
+    ws.SetPongDelegate(
+        [&pongs](
+            const std::string& data
+        ){
+            pongs.push_back(data);
+        }
+    );
+    EXPECT_FALSE(
+        ws.OpenAsServer(
+            connection,
+            request,
+            response,
+            "\x8A"
+        )
+    );
+    EXPECT_EQ(400, response.statusCode);
+    EXPECT_EQ("Bad Request", response.reasonPhrase);
 }
 
 TEST_F(WebSocketTests, SendPingNormalWithData) {

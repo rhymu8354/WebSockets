@@ -723,6 +723,11 @@ namespace WebSockets {
         if (SystemAbstractions::ToLower(request.headers.GetHeaderValue("Upgrade")) != "websocket") {
             return false;
         }
+        if (!trailer.empty()) {
+            response.statusCode = 400;
+            response.reasonPhrase = "Bad Request";
+            return false;
+        }
         impl_->key = request.headers.GetHeaderValue("Sec-WebSocket-Key");
         if (Base64::Decode(impl_->key).length() != REQUIRED_WEBSOCKET_KEY_LENGTH) {
             return false;
@@ -735,14 +740,6 @@ namespace WebSockets {
         response.headers.SetHeader("Upgrade", "websocket");
         response.headers.SetHeader("Sec-WebSocket-Accept", ComputeKeyAnswer(impl_->key));
         Open(connection, Role::Server);
-        if (!trailer.empty()) {
-            impl_->ReceiveData(
-                std::vector< uint8_t >(
-                    trailer.begin(),
-                    trailer.end()
-                )
-            );
-        }
         return true;
     }
 
