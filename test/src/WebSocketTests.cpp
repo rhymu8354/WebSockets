@@ -642,6 +642,8 @@ TEST_F(WebSocketTests, FailCompleteOpenAsServerMissingKey) {
             ""
         )
     );
+    EXPECT_EQ(400, response.statusCode);
+    EXPECT_EQ("Bad Request", response.reasonPhrase);
 }
 
 TEST_F(WebSocketTests, FailCompleteOpenAsServerBadKey) {
@@ -662,6 +664,8 @@ TEST_F(WebSocketTests, FailCompleteOpenAsServerBadKey) {
             ""
         )
     );
+    EXPECT_EQ(400, response.statusCode);
+    EXPECT_EQ("Bad Request", response.reasonPhrase);
     key = Base64::Encode("abcdefghijklmnopq");
     request.headers.SetHeader("Sec-WebSocket-Key", key);
     ASSERT_FALSE(
@@ -672,6 +676,8 @@ TEST_F(WebSocketTests, FailCompleteOpenAsServerBadKey) {
             ""
         )
     );
+    EXPECT_EQ(400, response.statusCode);
+    EXPECT_EQ("Bad Request", response.reasonPhrase);
     key = Base64::Encode("abcdefghijklmnop");
     request.headers.SetHeader("Sec-WebSocket-Key", key);
     ASSERT_TRUE(
@@ -701,6 +707,8 @@ TEST_F(WebSocketTests, FailCompleteOpenAsServerMissingVersion) {
             ""
         )
     );
+    EXPECT_EQ(400, response.statusCode);
+    EXPECT_EQ("Bad Request", response.reasonPhrase);
 }
 
 TEST_F(WebSocketTests, FailCompleteOpenAsServerBadVersion) {
@@ -721,6 +729,8 @@ TEST_F(WebSocketTests, FailCompleteOpenAsServerBadVersion) {
             ""
         )
     );
+    EXPECT_EQ(400, response.statusCode);
+    EXPECT_EQ("Bad Request", response.reasonPhrase);
     request.headers.SetHeader("Sec-WebSocket-Version", "14");
     ASSERT_FALSE(
         ws.OpenAsServer(
@@ -730,6 +740,8 @@ TEST_F(WebSocketTests, FailCompleteOpenAsServerBadVersion) {
             ""
         )
     );
+    EXPECT_EQ(400, response.statusCode);
+    EXPECT_EQ("Bad Request", response.reasonPhrase);
     request.headers.SetHeader("Sec-WebSocket-Version", "13");
     ASSERT_TRUE(
         ws.OpenAsServer(

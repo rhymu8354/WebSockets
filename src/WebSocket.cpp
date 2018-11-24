@@ -714,13 +714,15 @@ namespace WebSockets {
         if (request.method != "GET") {
             return false;
         }
-        if (request.headers.GetHeaderValue("Sec-WebSocket-Version") != CURRENTLY_SUPPORTED_WEBSOCKET_VERSION) {
-            return false;
-        }
         if (!request.headers.HasHeaderToken("Connection", "upgrade")) {
             return false;
         }
         if (SystemAbstractions::ToLower(request.headers.GetHeaderValue("Upgrade")) != "websocket") {
+            return false;
+        }
+        if (request.headers.GetHeaderValue("Sec-WebSocket-Version") != CURRENTLY_SUPPORTED_WEBSOCKET_VERSION) {
+            response.statusCode = 400;
+            response.reasonPhrase = "Bad Request";
             return false;
         }
         if (!trailer.empty()) {
@@ -730,6 +732,8 @@ namespace WebSockets {
         }
         impl_->key = request.headers.GetHeaderValue("Sec-WebSocket-Key");
         if (Base64::Decode(impl_->key).length() != REQUIRED_WEBSOCKET_KEY_LENGTH) {
+            response.statusCode = 400;
+            response.reasonPhrase = "Bad Request";
             return false;
         }
         auto connectionTokens = response.headers.GetHeaderTokens("Connection");
