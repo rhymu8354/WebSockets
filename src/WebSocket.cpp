@@ -867,22 +867,27 @@ namespace WebSockets {
     }
 
     void WebSocket::SetCloseDelegate(CloseReceivedDelegate closeDelegate) {
+        std::lock_guard< decltype(impl_->mutex) > lock(impl_->mutex);
         impl_->closeDelegate = closeDelegate;
     }
 
     void WebSocket::SetPingDelegate(MessageReceivedDelegate pingDelegate) {
+        std::lock_guard< decltype(impl_->mutex) > lock(impl_->mutex);
         impl_->pingDelegate = pingDelegate;
     }
 
     void WebSocket::SetPongDelegate(MessageReceivedDelegate pongDelegate) {
+        std::lock_guard< decltype(impl_->mutex) > lock(impl_->mutex);
         impl_->pongDelegate = pongDelegate;
     }
 
     void WebSocket::SetTextDelegate(MessageReceivedDelegate textDelegate) {
+        std::lock_guard< decltype(impl_->mutex) > lock(impl_->mutex);
         impl_->textDelegate = textDelegate;
     }
 
     void WebSocket::SetBinaryDelegate(MessageReceivedDelegate binaryDelegate) {
+        std::lock_guard< decltype(impl_->mutex) > lock(impl_->mutex);
         impl_->binaryDelegate = binaryDelegate;
     }
 
