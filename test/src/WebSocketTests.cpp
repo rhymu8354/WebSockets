@@ -499,7 +499,7 @@ TEST_F(WebSocketTests, CompleteOpenAsServer) {
         "websocket",
         SystemAbstractions::ToLower(response.headers.GetHeaderValue("Upgrade"))
     );
-    EXPECT_TRUE(request.headers.HasHeaderToken("Connection", "upgrade"));
+    EXPECT_TRUE(response.headers.HasHeaderToken("Connection", "upgrade"));
     EXPECT_EQ(
         "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=",
         response.headers.GetHeaderValue("Sec-WebSocket-Accept")
