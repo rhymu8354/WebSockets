@@ -7,9 +7,11 @@
  */
 
 #include <Base64/Base64.hpp>
+#include <functional>
 #include <mutex>
 #include <Hash/Sha1.hpp>
 #include <Hash/Templates.hpp>
+#include <queue>
 #include <stdint.h>
 #include <SystemAbstractions/CryptoRandom.hpp>
 #include <SystemAbstractions/DiagnosticsSender.hpp>
@@ -147,6 +149,12 @@ namespace WebSockets {
         std::recursive_mutex mutex;
 
         /**
+         * This is a queue of functions to be called without holding the mutex,
+         * used to call delegates without risking deadlocks.
+         */
+        std::queue< std::function< void() > > delegateCallQueue;
+
+        /**
          * This is the connection to use to send and receive frames.
          */
         std::shared_ptr< Http::Connection > connection;
@@ -247,6 +255,24 @@ namespace WebSockets {
         }
 
         /**
+         * This method safely empties the delegate call queue, calling each
+         * queued function in order.
+         */
+        void ProcessDelegateCallQueue() {
+            std::unique_lock< decltype(mutex) > lock(mutex);
+            while (!delegateCallQueue.empty()) {
+                decltype(delegateCallQueue) delegates;
+                delegates.swap(delegateCallQueue);
+                lock.unlock();
+                while (!delegates.empty()) {
+                    delegates.front()();
+                    delegates.pop();
+                }
+                lock.lock();
+            }
+        }
+
+        /**
          * This method responds to the WebSocket being closed.
          *
          * @param[in] code
@@ -262,7 +288,12 @@ namespace WebSockets {
             const auto closeSentEarlier = closeSent;
             closeReceived = true;
             if (closeDelegate != nullptr) {
-                closeDelegate(code, reason);
+                auto closeDelegateCopy = closeDelegate;
+                delegateCallQueue.push(
+                    [closeDelegateCopy, code, reason]{
+                        closeDelegateCopy(code, reason);
+                    }
+                );
             }
             if (
                 closeSentEarlier
@@ -285,10 +316,32 @@ namespace WebSockets {
             Utf8::Utf8 utf8;
             if (utf8.IsValidEncoding(message)) {
                 if (textDelegate != nullptr) {
-                    textDelegate(message);
+                    auto textDelegateCopy = textDelegate;
+                    delegateCallQueue.push(
+                        [textDelegateCopy, message]{
+                            textDelegateCopy(message);
+                        }
+                    );
                 }
             } else {
                 Close(1007, "invalid UTF-8 encoding in text message", true);
+            }
+        }
+
+        /**
+         * This method is called if a binary message has been received.
+         *
+         * @param[in] message
+         *     This is the binary message that has been received.
+         */
+        void OnBinaryMessage(const std::string& message) {
+            if (binaryDelegate != nullptr) {
+                auto binaryDelegateCopy = binaryDelegate;
+                delegateCallQueue.push(
+                    [binaryDelegateCopy, message]{
+                        binaryDelegateCopy(message);
+                    }
+                );
             }
         }
 
@@ -463,9 +516,7 @@ namespace WebSockets {
 
                         case FragmentedMessageType::Binary: {
                             if (fin) {
-                                if (binaryDelegate != nullptr) {
-                                    binaryDelegate(messageReassemblyBuffer);
-                                }
+                                OnBinaryMessage(messageReassemblyBuffer);
                             }
                         } break;
 
@@ -496,9 +547,7 @@ namespace WebSockets {
                 case OPCODE_BINARY: {
                     if (receiving == FragmentedMessageType::None) {
                         if (fin) {
-                            if (binaryDelegate != nullptr) {
-                                binaryDelegate(data);
-                            }
+                            OnBinaryMessage(data);
                         } else {
                             receiving = FragmentedMessageType::Binary;
                             messageReassemblyBuffer = data;
@@ -536,14 +585,24 @@ namespace WebSockets {
 
                 case OPCODE_PING: {
                     if (pingDelegate != nullptr) {
-                        pingDelegate(data);
+                        auto pingDelegateCopy = pingDelegate;
+                        delegateCallQueue.push(
+                            [pingDelegateCopy, data]{
+                                pingDelegateCopy(data);
+                            }
+                        );
                     }
                     SendFrame(true, OPCODE_PONG, data);
                 } break;
 
                 case OPCODE_PONG: {
                     if (pongDelegate != nullptr) {
-                        pongDelegate(data);
+                        auto pongDelegateCopy = pongDelegate;
+                        delegateCallQueue.push(
+                            [pongDelegateCopy, data]{
+                                pongDelegateCopy(data);
+                            }
+                        );
                     }
                 } break;
 
@@ -772,6 +831,7 @@ namespace WebSockets {
                 const auto impl = implWeak.lock();
                 if (impl) {
                     impl->ReceiveData(data);
+                    impl->ProcessDelegateCallQueue();
                 }
             }
         );
@@ -780,6 +840,7 @@ namespace WebSockets {
                 const auto impl = implWeak.lock();
                 if (impl) {
                     impl->ConnectionBroken();
+                    impl->ProcessDelegateCallQueue();
                 }
             }
         );
@@ -789,15 +850,17 @@ namespace WebSockets {
         unsigned int code,
         const std::string reason
     ) {
-        std::lock_guard< decltype(impl_->mutex) > lock(impl_->mutex);
+        std::unique_lock< decltype(impl_->mutex) > lock(impl_->mutex);
         if (impl_->connection == nullptr) {
             return;
         }
         impl_->Close(code, reason);
+        lock.unlock();
+        impl_->ProcessDelegateCallQueue();
     }
 
     void WebSocket::Ping(const std::string& data) {
-        std::lock_guard< decltype(impl_->mutex) > lock(impl_->mutex);
+        std::unique_lock< decltype(impl_->mutex) > lock(impl_->mutex);
         if (impl_->connection == nullptr) {
             return;
         }
@@ -808,10 +871,12 @@ namespace WebSockets {
             return;
         }
         impl_->SendFrame(true, OPCODE_PING, data);
+        lock.unlock();
+        impl_->ProcessDelegateCallQueue();
     }
 
     void WebSocket::Pong(const std::string& data) {
-        std::lock_guard< decltype(impl_->mutex) > lock(impl_->mutex);
+        std::unique_lock< decltype(impl_->mutex) > lock(impl_->mutex);
         if (impl_->connection == nullptr) {
             return;
         }
@@ -822,13 +887,15 @@ namespace WebSockets {
             return;
         }
         impl_->SendFrame(true, OPCODE_PONG, data);
+        lock.unlock();
+        impl_->ProcessDelegateCallQueue();
     }
 
     void WebSocket::SendText(
         const std::string& data,
         bool lastFragment
     ) {
-        std::lock_guard< decltype(impl_->mutex) > lock(impl_->mutex);
+        std::unique_lock< decltype(impl_->mutex) > lock(impl_->mutex);
         if (impl_->connection == nullptr) {
             return;
         }
@@ -849,13 +916,15 @@ namespace WebSockets {
             ? FragmentedMessageType::None
             : FragmentedMessageType::Text
         );
+        lock.unlock();
+        impl_->ProcessDelegateCallQueue();
     }
 
     void WebSocket::SendBinary(
         const std::string& data,
         bool lastFragment
     ) {
-        std::lock_guard< decltype(impl_->mutex) > lock(impl_->mutex);
+        std::unique_lock< decltype(impl_->mutex) > lock(impl_->mutex);
         if (impl_->connection == nullptr) {
             return;
         }
@@ -876,6 +945,8 @@ namespace WebSockets {
             ? FragmentedMessageType::None
             : FragmentedMessageType::Binary
         );
+        lock.unlock();
+        impl_->ProcessDelegateCallQueue();
     }
 
     void WebSocket::SetCloseDelegate(CloseReceivedDelegate closeDelegate) {
