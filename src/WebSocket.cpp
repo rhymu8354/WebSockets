@@ -295,13 +295,7 @@ namespace WebSockets {
                     }
                 );
             }
-            if (
-                closeSentEarlier
-
-                // NOTE: come back and review this to look for better solution
-                // (See notes and/or vod for stream 73)
-                && (connection != nullptr)
-            ) {
+            if (closeSentEarlier) {
                 connection->Break(false);
             }
         }
@@ -689,16 +683,11 @@ namespace WebSockets {
                 return;
             }
             Close(1006, "connection broken by peer", true);
-
-            // NOTE: come back and review this to look for better solution
-            // (See notes and/or vod for stream 73)
-            if (connection != nullptr) {
-                diagnosticsSender.SendDiagnosticInformationFormatted(
-                    1,
-                    "Connection to %s broken by peer",
-                    connection->GetPeerId().c_str()
-                );
-            }
+            diagnosticsSender.SendDiagnosticInformationFormatted(
+                1,
+                "Connection to %s broken by peer",
+                connection->GetPeerId().c_str()
+            );
         }
     };
 
