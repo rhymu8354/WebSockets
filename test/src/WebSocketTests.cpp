@@ -1595,3 +1595,67 @@ TEST_F(WebSocketTests, ReceiveTextAfterMoving) {
         texts
     );
 }
+
+TEST_F(WebSocketTests, ReceiveTextBeforeRegisterringTextDelegate) {
+    // Arrange
+    const auto connection = std::make_shared< MockConnection >();
+    ws.Open(connection, WebSockets::WebSocket::Role::Client);
+    std::vector< std::string > texts;
+
+    // Act
+    const std::string frame1 = "\x81\x06" "foobar";
+    const std::string frame2 = "\x81\x06" "Hello!";
+    connection->dataReceivedDelegate({frame1.begin(), frame1.end()});
+    connection->dataReceivedDelegate({frame2.begin(), frame2.end()});
+    ws.SetTextDelegate(
+        [&texts](
+            const std::string& data
+        ){
+            texts.push_back(data);
+        }
+    );
+
+    // Assert
+    ASSERT_EQ(
+        (std::vector< std::string >{
+            "foobar",
+            "Hello!",
+        }),
+        texts
+    );
+}
+
+TEST_F(WebSocketTests, ConnectionBrokenBeforeRegisterringCloseDelegate) {
+    // Arrange
+    const auto connection = std::make_shared< MockConnection >();
+    ws.Open(connection, WebSockets::WebSocket::Role::Server);
+    unsigned int codeReceived;
+    std::string reasonReceived;
+    bool closeReceived = false;
+
+    // Act
+    connection->brokenDelegate(false);
+    ws.SetCloseDelegate(
+        [&codeReceived, &reasonReceived, &closeReceived](
+            unsigned int code,
+            const std::string& reason
+        ){
+            codeReceived = code;
+            reasonReceived = reason;
+            closeReceived = true;
+        }
+    );
+
+    // Assert
+    ASSERT_TRUE(connection->brokenByWebSocket);
+    ASSERT_TRUE(closeReceived);
+    EXPECT_EQ(1006, codeReceived);
+    EXPECT_EQ("connection broken by peer", reasonReceived);
+    ASSERT_EQ(
+        (std::vector< std::string >{
+            "WebSockets::WebSocket[1]: Connection to mock-client:5555 broken by peer",
+        }),
+        diagnosticMessages
+    );
+    diagnosticMessages.clear();
+}

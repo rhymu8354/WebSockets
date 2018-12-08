@@ -11,6 +11,7 @@
 #include <mutex>
 #include <Hash/Sha1.hpp>
 #include <Hash/Templates.hpp>
+#include <list>
 #include <queue>
 #include <stdint.h>
 #include <SystemAbstractions/CryptoRandom.hpp>
@@ -111,6 +112,58 @@ namespace {
     };
 
     /**
+     * This represents something that happens with a WebSocket that should be
+     * reported through a user delegate.
+     */
+    struct Event {
+        /**
+         * This indicates the type of event that happened.
+         */
+        enum class Type {
+            /**
+             * This is the default type, used when an event isn't yet set up.
+             */
+            Unknown,
+
+            /**
+             * This indicates a text message was received.
+             */
+            Text,
+
+            /**
+             * This indicates a binary message was received.
+             */
+            Binary,
+
+            /**
+             * This indicates a ping was received.
+             */
+            Ping,
+
+            /**
+             * This indicates a pong was received.
+             */
+            Pong,
+
+            /**
+             * This indicates the WebSocket was closed.
+             */
+            Close,
+        } type = Type::Unknown;
+
+        /**
+         * This is the data payload from the message.
+         */
+        std::string content;
+
+        /**
+         * If the event is a close, this is the status code from the received
+         * close frame.
+         */
+        unsigned int closeCode;
+    };
+
+    /**
      * This function computes the value of the "Sec-WebSocket-Accept"
      * HTTP response header that matches the given value of the
      * "Sec-WebSocket-Key" HTTP request header.
@@ -149,10 +202,11 @@ namespace WebSockets {
         std::recursive_mutex mutex;
 
         /**
-         * This is a queue of functions to be called without holding the mutex,
-         * used to call delegates without risking deadlocks.
+         * This is the queue of events waiting to be reported through
+         * delegates.  They sit here until a delegate is registered and the
+         * WebSocket's mutex is not being held (to prevent deadlocks).
          */
-        std::queue< std::function< void() > > delegateCallQueue;
+        std::list< Event > eventQueue;
 
         /**
          * This is the connection to use to send and receive frames.
@@ -255,14 +309,83 @@ namespace WebSockets {
         }
 
         /**
-         * This method safely empties the delegate call queue, calling each
-         * queued function in order.
+         * This method safely processes the event queue.  For each event,
+         * if a corresponding delegate is registered, the delegate is
+         * called and the event is removed from the queue.
          */
-        void ProcessDelegateCallQueue() {
+        void ProcessEventQueue() {
             std::unique_lock< decltype(mutex) > lock(mutex);
-            while (!delegateCallQueue.empty()) {
-                decltype(delegateCallQueue) delegates;
-                delegates.swap(delegateCallQueue);
+            while (!eventQueue.empty()) {
+                std::queue< std::function< void() > > delegates;
+                auto eventEntry = eventQueue.begin();
+                while (eventEntry != eventQueue.end()) {
+                    std::function< void() > delegate;
+                    switch (eventEntry->type) {
+                        case Event::Type::Text: {
+                            if (textDelegate != nullptr) {
+                                auto textDelegateCopy = textDelegate;
+                                const auto message = eventEntry->content;
+                                delegate = [textDelegateCopy, message]{
+                                    textDelegateCopy(message);
+                                };
+                            }
+                        } break;
+
+                        case Event::Type::Binary: {
+                            if (binaryDelegate != nullptr) {
+                                auto binaryDelegateCopy = binaryDelegate;
+                                const auto message = eventEntry->content;
+                                delegate = [binaryDelegateCopy, message]{
+                                    binaryDelegateCopy(message);
+                                };
+                            }
+                        } break;
+
+                        case Event::Type::Ping: {
+                            if (pingDelegate != nullptr) {
+                                auto pingDelegateCopy = pingDelegate;
+                                const auto message = eventEntry->content;
+                                delegate = [pingDelegateCopy, message]{
+                                    pingDelegateCopy(message);
+                                };
+                            }
+                        } break;
+
+                        case Event::Type::Pong: {
+                            if (pongDelegate != nullptr) {
+                                auto pongDelegateCopy = pongDelegate;
+                                const auto message = eventEntry->content;
+                                delegate = [pongDelegateCopy, message]{
+                                    pongDelegateCopy(message);
+                                };
+                            }
+                        } break;
+
+                        case Event::Type::Close: {
+                            if (closeDelegate != nullptr) {
+                                const auto closeDelegateCopy = closeDelegate;
+                                const auto code = eventEntry->closeCode;
+                                const auto reason = eventEntry->content;
+                                delegate = [closeDelegateCopy, code, reason]{
+                                    closeDelegateCopy(code, reason);
+                                };
+                            }
+                        } break;
+
+                        default: {
+                            delegate = []{};
+                        }
+                    }
+                    if (delegate == nullptr) {
+                        ++eventEntry;
+                    } else {
+                        delegates.push(delegate);
+                        eventEntry = eventQueue.erase(eventEntry);
+                    }
+                }
+                if (delegates.empty()) {
+                    return;
+                }
                 lock.unlock();
                 while (!delegates.empty()) {
                     delegates.front()();
@@ -287,14 +410,11 @@ namespace WebSockets {
         ) {
             const auto closeSentEarlier = closeSent;
             closeReceived = true;
-            if (closeDelegate != nullptr) {
-                auto closeDelegateCopy = closeDelegate;
-                delegateCallQueue.push(
-                    [closeDelegateCopy, code, reason]{
-                        closeDelegateCopy(code, reason);
-                    }
-                );
-            }
+            Event event;
+            event.type = Event::Type::Close;
+            event.closeCode = code;
+            event.content = reason;
+            eventQueue.push_back(std::move(event));
             if (closeSentEarlier) {
                 connection->Break(false);
             }
@@ -309,14 +429,10 @@ namespace WebSockets {
         void OnTextMessage(const std::string& message) {
             Utf8::Utf8 utf8;
             if (utf8.IsValidEncoding(message)) {
-                if (textDelegate != nullptr) {
-                    auto textDelegateCopy = textDelegate;
-                    delegateCallQueue.push(
-                        [textDelegateCopy, message]{
-                            textDelegateCopy(message);
-                        }
-                    );
-                }
+                Event event;
+                event.type = Event::Type::Text;
+                event.content = message;
+                eventQueue.push_back(std::move(event));
             } else {
                 Close(1007, "invalid UTF-8 encoding in text message", true);
             }
@@ -329,14 +445,10 @@ namespace WebSockets {
          *     This is the binary message that has been received.
          */
         void OnBinaryMessage(const std::string& message) {
-            if (binaryDelegate != nullptr) {
-                auto binaryDelegateCopy = binaryDelegate;
-                delegateCallQueue.push(
-                    [binaryDelegateCopy, message]{
-                        binaryDelegateCopy(message);
-                    }
-                );
-            }
+            Event event;
+            event.type = Event::Type::Binary;
+            event.content = message;
+            eventQueue.push_back(std::move(event));
         }
 
         /**
@@ -578,26 +690,18 @@ namespace WebSockets {
                 } break;
 
                 case OPCODE_PING: {
-                    if (pingDelegate != nullptr) {
-                        auto pingDelegateCopy = pingDelegate;
-                        delegateCallQueue.push(
-                            [pingDelegateCopy, data]{
-                                pingDelegateCopy(data);
-                            }
-                        );
-                    }
+                    Event event;
+                    event.type = Event::Type::Ping;
+                    event.content = data;
+                    eventQueue.push_back(std::move(event));
                     SendFrame(true, OPCODE_PONG, data);
                 } break;
 
                 case OPCODE_PONG: {
-                    if (pongDelegate != nullptr) {
-                        auto pongDelegateCopy = pongDelegate;
-                        delegateCallQueue.push(
-                            [pongDelegateCopy, data]{
-                                pongDelegateCopy(data);
-                            }
-                        );
-                    }
+                    Event event;
+                    event.type = Event::Type::Pong;
+                    event.content = data;
+                    eventQueue.push_back(std::move(event));
                 } break;
 
                 default: {
@@ -820,7 +924,7 @@ namespace WebSockets {
                 const auto impl = implWeak.lock();
                 if (impl) {
                     impl->ReceiveData(data);
-                    impl->ProcessDelegateCallQueue();
+                    impl->ProcessEventQueue();
                 }
             }
         );
@@ -829,7 +933,7 @@ namespace WebSockets {
                 const auto impl = implWeak.lock();
                 if (impl) {
                     impl->ConnectionBroken();
-                    impl->ProcessDelegateCallQueue();
+                    impl->ProcessEventQueue();
                 }
             }
         );
@@ -845,7 +949,7 @@ namespace WebSockets {
         }
         impl_->Close(code, reason);
         lock.unlock();
-        impl_->ProcessDelegateCallQueue();
+        impl_->ProcessEventQueue();
     }
 
     void WebSocket::Ping(const std::string& data) {
@@ -861,7 +965,7 @@ namespace WebSockets {
         }
         impl_->SendFrame(true, OPCODE_PING, data);
         lock.unlock();
-        impl_->ProcessDelegateCallQueue();
+        impl_->ProcessEventQueue();
     }
 
     void WebSocket::Pong(const std::string& data) {
@@ -877,7 +981,7 @@ namespace WebSockets {
         }
         impl_->SendFrame(true, OPCODE_PONG, data);
         lock.unlock();
-        impl_->ProcessDelegateCallQueue();
+        impl_->ProcessEventQueue();
     }
 
     void WebSocket::SendText(
@@ -906,7 +1010,7 @@ namespace WebSockets {
             : FragmentedMessageType::Text
         );
         lock.unlock();
-        impl_->ProcessDelegateCallQueue();
+        impl_->ProcessEventQueue();
     }
 
     void WebSocket::SendBinary(
@@ -935,32 +1039,42 @@ namespace WebSockets {
             : FragmentedMessageType::Binary
         );
         lock.unlock();
-        impl_->ProcessDelegateCallQueue();
+        impl_->ProcessEventQueue();
     }
 
     void WebSocket::SetCloseDelegate(CloseReceivedDelegate closeDelegate) {
-        std::lock_guard< decltype(impl_->mutex) > lock(impl_->mutex);
+        std::unique_lock< decltype(impl_->mutex) > lock(impl_->mutex);
         impl_->closeDelegate = closeDelegate;
+        lock.unlock();
+        impl_->ProcessEventQueue();
     }
 
     void WebSocket::SetPingDelegate(MessageReceivedDelegate pingDelegate) {
-        std::lock_guard< decltype(impl_->mutex) > lock(impl_->mutex);
+        std::unique_lock< decltype(impl_->mutex) > lock(impl_->mutex);
         impl_->pingDelegate = pingDelegate;
+        lock.unlock();
+        impl_->ProcessEventQueue();
     }
 
     void WebSocket::SetPongDelegate(MessageReceivedDelegate pongDelegate) {
-        std::lock_guard< decltype(impl_->mutex) > lock(impl_->mutex);
+        std::unique_lock< decltype(impl_->mutex) > lock(impl_->mutex);
         impl_->pongDelegate = pongDelegate;
+        lock.unlock();
+        impl_->ProcessEventQueue();
     }
 
     void WebSocket::SetTextDelegate(MessageReceivedDelegate textDelegate) {
-        std::lock_guard< decltype(impl_->mutex) > lock(impl_->mutex);
+        std::unique_lock< decltype(impl_->mutex) > lock(impl_->mutex);
         impl_->textDelegate = textDelegate;
+        lock.unlock();
+        impl_->ProcessEventQueue();
     }
 
     void WebSocket::SetBinaryDelegate(MessageReceivedDelegate binaryDelegate) {
-        std::lock_guard< decltype(impl_->mutex) > lock(impl_->mutex);
+        std::unique_lock< decltype(impl_->mutex) > lock(impl_->mutex);
         impl_->binaryDelegate = binaryDelegate;
+        lock.unlock();
+        impl_->ProcessEventQueue();
     }
 
 }
