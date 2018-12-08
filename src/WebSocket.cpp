@@ -710,10 +710,10 @@ namespace WebSockets {
         if (impl_->connection != nullptr) {
             impl_->connection->SetDataReceivedDelegate(nullptr);
             impl_->connection->SetBrokenDelegate(nullptr);
-            impl_->connection->Break(false);
             auto connection = impl_->connection;
             impl_->connection = nullptr;
             lock.unlock();
+            connection->Break(false);
             connection = nullptr;
             lock.lock();
         }
