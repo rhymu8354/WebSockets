@@ -252,34 +252,17 @@ namespace WebSockets {
         FragmentedMessageType receiving = FragmentedMessageType::None;
 
         /**
-         * This is the function to call whenever the WebSocket
-         * has received a close frame or has been closed due to an error.
+         * This holds the functions to call whenever anything interesting
+         * happens.
          */
-        CloseReceivedDelegate closeDelegate;
+        Delegates delegates;
 
         /**
-         * This is the function to call whenever a ping message
-         * is received by the WebSocket.
+         * This indicates whether or not delegates have been set for the
+         * WebSocket.  Until this is true, the event queue is not emptied, so
+         * that any events will not be lost.
          */
-        MessageReceivedDelegate pingDelegate;
-
-        /**
-         * This is the function to call whenever a pong message
-         * is received by the WebSocket.
-         */
-        MessageReceivedDelegate pongDelegate;
-
-        /**
-         * This is the function to call whenever a text message
-         * is received by the WebSocket.
-         */
-        MessageReceivedDelegate textDelegate;
-
-        /**
-         * This is the function to call whenever a binary message
-         * is received by the WebSocket.
-         */
-        MessageReceivedDelegate binaryDelegate;
+        bool delegatesSet = false;
 
         /**
          * This is where we put data received before it's been
@@ -315,81 +298,77 @@ namespace WebSockets {
          */
         void ProcessEventQueue() {
             std::unique_lock< decltype(mutex) > lock(mutex);
+            if (!delegatesSet) {
+                return;
+            }
+            auto delegatesCopy = delegates;
             while (!eventQueue.empty()) {
-                std::queue< std::function< void() > > delegates;
+                std::queue< std::function< void() > > delegateCallers;
                 auto eventEntry = eventQueue.begin();
                 while (eventEntry != eventQueue.end()) {
-                    std::function< void() > delegate;
+                    std::function< void() > delegateCaller;
                     switch (eventEntry->type) {
                         case Event::Type::Text: {
-                            if (textDelegate != nullptr) {
-                                auto textDelegateCopy = textDelegate;
+                            if (delegatesCopy.text != nullptr) {
                                 const auto message = eventEntry->content;
-                                delegate = [textDelegateCopy, message]{
-                                    textDelegateCopy(message);
+                                delegateCaller = [delegatesCopy, message]{
+                                    delegatesCopy.text(message);
                                 };
                             }
                         } break;
 
                         case Event::Type::Binary: {
-                            if (binaryDelegate != nullptr) {
-                                auto binaryDelegateCopy = binaryDelegate;
+                            if (delegatesCopy.binary != nullptr) {
                                 const auto message = eventEntry->content;
-                                delegate = [binaryDelegateCopy, message]{
-                                    binaryDelegateCopy(message);
+                                delegateCaller = [delegatesCopy, message]{
+                                    delegatesCopy.binary(message);
                                 };
                             }
                         } break;
 
                         case Event::Type::Ping: {
-                            if (pingDelegate != nullptr) {
-                                auto pingDelegateCopy = pingDelegate;
+                            if (delegatesCopy.ping != nullptr) {
                                 const auto message = eventEntry->content;
-                                delegate = [pingDelegateCopy, message]{
-                                    pingDelegateCopy(message);
+                                delegateCaller = [delegatesCopy, message]{
+                                    delegatesCopy.ping(message);
                                 };
                             }
                         } break;
 
                         case Event::Type::Pong: {
-                            if (pongDelegate != nullptr) {
-                                auto pongDelegateCopy = pongDelegate;
+                            if (delegatesCopy.pong != nullptr) {
                                 const auto message = eventEntry->content;
-                                delegate = [pongDelegateCopy, message]{
-                                    pongDelegateCopy(message);
+                                delegateCaller = [delegatesCopy, message]{
+                                    delegatesCopy.pong(message);
                                 };
                             }
                         } break;
 
                         case Event::Type::Close: {
-                            if (closeDelegate != nullptr) {
-                                const auto closeDelegateCopy = closeDelegate;
+                            if (delegatesCopy.close != nullptr) {
                                 const auto code = eventEntry->closeCode;
                                 const auto reason = eventEntry->content;
-                                delegate = [closeDelegateCopy, code, reason]{
-                                    closeDelegateCopy(code, reason);
+                                delegateCaller = [delegatesCopy, code, reason]{
+                                    delegatesCopy.close(code, reason);
                                 };
                             }
                         } break;
 
-                        default: {
-                            delegate = []{};
-                        }
+                        default: break;
                     }
-                    if (delegate == nullptr) {
-                        ++eventEntry;
-                    } else {
-                        delegates.push(delegate);
-                        eventEntry = eventQueue.erase(eventEntry);
+                    if (delegateCaller != nullptr) {
+                        delegateCallers.push(delegateCaller);
                     }
+                    eventEntry = eventQueue.erase(eventEntry);
                 }
-                if (delegates.empty()) {
+                if (delegateCallers.empty()) {
                     return;
                 }
                 lock.unlock();
-                while (!delegates.empty()) {
-                    delegates.front()();
-                    delegates.pop();
+                while (!delegateCallers.empty()) {
+                    const auto delegateCaller = delegateCallers.front();
+                    delegateCaller();
+                    delegateCallers.pop();
                 }
                 lock.lock();
             }
@@ -1027,37 +1006,10 @@ namespace WebSockets {
         impl_->ProcessEventQueue();
     }
 
-    void WebSocket::SetCloseDelegate(CloseReceivedDelegate closeDelegate) {
+    void WebSocket::SetDelegates(Delegates&& delegates) {
         std::unique_lock< decltype(impl_->mutex) > lock(impl_->mutex);
-        impl_->closeDelegate = closeDelegate;
-        lock.unlock();
-        impl_->ProcessEventQueue();
-    }
-
-    void WebSocket::SetPingDelegate(MessageReceivedDelegate pingDelegate) {
-        std::unique_lock< decltype(impl_->mutex) > lock(impl_->mutex);
-        impl_->pingDelegate = pingDelegate;
-        lock.unlock();
-        impl_->ProcessEventQueue();
-    }
-
-    void WebSocket::SetPongDelegate(MessageReceivedDelegate pongDelegate) {
-        std::unique_lock< decltype(impl_->mutex) > lock(impl_->mutex);
-        impl_->pongDelegate = pongDelegate;
-        lock.unlock();
-        impl_->ProcessEventQueue();
-    }
-
-    void WebSocket::SetTextDelegate(MessageReceivedDelegate textDelegate) {
-        std::unique_lock< decltype(impl_->mutex) > lock(impl_->mutex);
-        impl_->textDelegate = textDelegate;
-        lock.unlock();
-        impl_->ProcessEventQueue();
-    }
-
-    void WebSocket::SetBinaryDelegate(MessageReceivedDelegate binaryDelegate) {
-        std::unique_lock< decltype(impl_->mutex) > lock(impl_->mutex);
-        impl_->binaryDelegate = binaryDelegate;
+        impl_->delegates = std::move(delegates);
+        impl_->delegatesSet = true;
         lock.unlock();
         impl_->ProcessEventQueue();
     }

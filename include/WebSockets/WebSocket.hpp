@@ -45,6 +45,7 @@ namespace WebSockets {
             Server,
         };
 
+
         /**
          * This is the type of function used to publish messages received
          * by the WebSocket.
@@ -71,6 +72,42 @@ namespace WebSockets {
                 const std::string& reason
             )
         > CloseReceivedDelegate;
+
+        /**
+         * This holds all the functions provided by the user to call whenever
+         * interesting events occur.
+         */
+        struct Delegates {
+            /**
+             * This is the function to call whenever a ping message
+             * is received by the WebSocket.
+             */
+            MessageReceivedDelegate ping;
+
+            /**
+             * This is the function to call whenever a pong message
+             * is received by the WebSocket.
+             */
+            MessageReceivedDelegate pong;
+
+            /**
+             * This is the function to call whenever a text message
+             * is received by the WebSocket.
+             */
+            MessageReceivedDelegate text;
+
+            /**
+             * This is the function to call whenever a binary message
+             * is received by the WebSocket.
+             */
+            MessageReceivedDelegate binary;
+
+            /**
+             * This is the function to call whenever the WebSocket
+             * has received a close frame or has been closed due to an error.
+             */
+            CloseReceivedDelegate close;
+        };
 
         // Lifecycle management
     public:
@@ -257,54 +294,15 @@ namespace WebSockets {
         );
 
         /**
-         * This method sets the function to call whenever the WebSocket
-         * has received a close frame or has been closed due to an error.
+         * This method sets the functions to call whenever interesting things
+         * happen.  Any events that occurred before the first time this method
+         * is called will be delivered immediately.
          *
-         * @param[in] closeDelegate
-         *     This is the function to call whenever the WebSocket
-         *     has received a close frame or has been closed due to an error.
+         * @param[in] delegates
+         *     This holds the individual functions to call.  Any of the
+         *     functions set to nullptr will simply not be called.
          */
-        void SetCloseDelegate(CloseReceivedDelegate closeDelegate);
-
-        /**
-         * This method sets the function to call whenever a ping message
-         * is received by the WebSocket.
-         *
-         * @param[in] pingDelegate
-         *     This is the function to call whenever a ping message
-         *     is received by the WebSocket.
-         */
-        void SetPingDelegate(MessageReceivedDelegate pingDelegate);
-
-        /**
-         * This method sets the function to call whenever a pong message
-         * is received by the WebSocket.
-         *
-         * @param[in] pongDelegate
-         *     This is the function to call whenever a pong message
-         *     is received by the WebSocket.
-         */
-        void SetPongDelegate(MessageReceivedDelegate pongDelegate);
-
-        /**
-         * This method sets the function to call whenever a text message
-         * is received by the WebSocket.
-         *
-         * @param[in] textDelegate
-         *     This is the function to call whenever a text message
-         *     is received by the WebSocket.
-         */
-        void SetTextDelegate(MessageReceivedDelegate textDelegate);
-
-        /**
-         * This method sets the function to call whenever a binary message
-         * is received by the WebSocket.
-         *
-         * @param[in] binaryDelegate
-         *     This is the function to call whenever a binary message
-         *     is received by the WebSocket.
-         */
-        void SetBinaryDelegate(MessageReceivedDelegate binaryDelegate);
+        void SetDelegates(Delegates&& delegates);
 
         // Private properties
     private:
