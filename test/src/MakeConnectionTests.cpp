@@ -72,6 +72,9 @@ namespace {
             return awaitCompletionResult;
         }
 
+        virtual void AwaitCompletion() override {
+        }
+
         virtual void SetCompletionDelegate(
             std::function< void() > completionDelegate
         ) override {
