@@ -11,7 +11,6 @@
 #include <mutex>
 #include <Hash/Sha1.hpp>
 #include <Hash/Templates.hpp>
-#include <list>
 #include <queue>
 #include <stdint.h>
 #include <SystemAbstractions/CryptoRandom.hpp>
@@ -206,7 +205,7 @@ namespace WebSockets {
          * delegates.  They sit here until a delegate is registered and the
          * WebSocket's mutex is not being held (to prevent deadlocks).
          */
-        std::list< Event > eventQueue;
+        std::queue< Event > eventQueue;
 
         /**
          * This is the connection to use to send and receive frames.
@@ -302,75 +301,48 @@ namespace WebSockets {
                 return;
             }
             auto delegatesCopy = delegates;
-            while (!eventQueue.empty()) {
-                std::queue< std::function< void() > > delegateCallers;
-                auto eventEntry = eventQueue.begin();
-                while (eventEntry != eventQueue.end()) {
-                    std::function< void() > delegateCaller;
-                    switch (eventEntry->type) {
-                        case Event::Type::Text: {
-                            if (delegatesCopy.text != nullptr) {
-                                const auto message = eventEntry->content;
-                                delegateCaller = [delegatesCopy, message]{
-                                    delegatesCopy.text(message);
-                                };
-                            }
-                        } break;
+            std::queue< Event > offloadedEvents;
+            offloadedEvents.swap(eventQueue);
+            lock.unlock();
+            while (!offloadedEvents.empty()) {
+                auto& event = offloadedEvents.front();
+                switch (event.type) {
+                    case Event::Type::Text: {
+                        if (delegatesCopy.text != nullptr) {
+                            delegatesCopy.text(std::move(event.content));
+                        }
+                    } break;
 
-                        case Event::Type::Binary: {
-                            if (delegatesCopy.binary != nullptr) {
-                                const auto message = eventEntry->content;
-                                delegateCaller = [delegatesCopy, message]{
-                                    delegatesCopy.binary(message);
-                                };
-                            }
-                        } break;
+                    case Event::Type::Binary: {
+                        if (delegatesCopy.binary != nullptr) {
+                            delegatesCopy.binary(std::move(event.content));
+                        }
+                    } break;
 
-                        case Event::Type::Ping: {
-                            if (delegatesCopy.ping != nullptr) {
-                                const auto message = eventEntry->content;
-                                delegateCaller = [delegatesCopy, message]{
-                                    delegatesCopy.ping(message);
-                                };
-                            }
-                        } break;
+                    case Event::Type::Ping: {
+                        if (delegatesCopy.ping != nullptr) {
+                            delegatesCopy.ping(std::move(event.content));
+                        }
+                    } break;
 
-                        case Event::Type::Pong: {
-                            if (delegatesCopy.pong != nullptr) {
-                                const auto message = eventEntry->content;
-                                delegateCaller = [delegatesCopy, message]{
-                                    delegatesCopy.pong(message);
-                                };
-                            }
-                        } break;
+                    case Event::Type::Pong: {
+                        if (delegatesCopy.pong != nullptr) {
+                            delegatesCopy.pong(std::move(event.content));
+                        }
+                    } break;
 
-                        case Event::Type::Close: {
-                            if (delegatesCopy.close != nullptr) {
-                                const auto code = eventEntry->closeCode;
-                                const auto reason = eventEntry->content;
-                                delegateCaller = [delegatesCopy, code, reason]{
-                                    delegatesCopy.close(code, reason);
-                                };
-                            }
-                        } break;
+                    case Event::Type::Close: {
+                        if (delegatesCopy.close != nullptr) {
+                            delegatesCopy.close(
+                                event.closeCode,
+                                std::move(event.content)
+                            );
+                        }
+                    } break;
 
-                        default: break;
-                    }
-                    if (delegateCaller != nullptr) {
-                        delegateCallers.push(delegateCaller);
-                    }
-                    eventEntry = eventQueue.erase(eventEntry);
+                    default: break;
                 }
-                if (delegateCallers.empty()) {
-                    return;
-                }
-                lock.unlock();
-                while (!delegateCallers.empty()) {
-                    const auto delegateCaller = delegateCallers.front();
-                    delegateCaller();
-                    delegateCallers.pop();
-                }
-                lock.lock();
+                offloadedEvents.pop();
             }
         }
 
@@ -385,7 +357,7 @@ namespace WebSockets {
          */
         void OnClose(
             unsigned int code,
-            const std::string reason
+            const std::string& reason
         ) {
             const auto closeSentEarlier = closeSent;
             closeReceived = true;
@@ -393,7 +365,7 @@ namespace WebSockets {
             event.type = Event::Type::Close;
             event.closeCode = code;
             event.content = reason;
-            eventQueue.push_back(std::move(event));
+            eventQueue.push(std::move(event));
             if (closeSentEarlier) {
                 connection->Break(false);
             }
@@ -405,13 +377,13 @@ namespace WebSockets {
          * @param[in] message
          *     This is the text message that has been received.
          */
-        void OnTextMessage(const std::string& message) {
+        void OnTextMessage(std::string&& message) {
             Utf8::Utf8 utf8;
             if (utf8.IsValidEncoding(message)) {
                 Event event;
                 event.type = Event::Type::Text;
-                event.content = message;
-                eventQueue.push_back(std::move(event));
+                event.content = std::move(message);
+                eventQueue.push(std::move(event));
             } else {
                 Close(1007, "invalid UTF-8 encoding in text message", true);
             }
@@ -423,11 +395,11 @@ namespace WebSockets {
          * @param[in] message
          *     This is the binary message that has been received.
          */
-        void OnBinaryMessage(const std::string& message) {
+        void OnBinaryMessage(std::string&& message) {
             Event event;
             event.type = Event::Type::Binary;
-            event.content = message;
-            eventQueue.push_back(std::move(event));
+            event.content = std::move(message);
+            eventQueue.push(std::move(event));
         }
 
         /**
@@ -595,13 +567,13 @@ namespace WebSockets {
                     switch (receiving) {
                         case FragmentedMessageType::Text: {
                             if (fin) {
-                                OnTextMessage(messageReassemblyBuffer);
+                                OnTextMessage(std::move(messageReassemblyBuffer));
                             }
                         } break;
 
                         case FragmentedMessageType::Binary: {
                             if (fin) {
-                                OnBinaryMessage(messageReassemblyBuffer);
+                                OnBinaryMessage(std::move(messageReassemblyBuffer));
                             }
                         } break;
 
@@ -619,7 +591,7 @@ namespace WebSockets {
                 case OPCODE_TEXT: {
                     if (receiving == FragmentedMessageType::None) {
                         if (fin) {
-                            OnTextMessage(data);
+                            OnTextMessage(std::move(data));
                         } else {
                             receiving = FragmentedMessageType::Text;
                             messageReassemblyBuffer = data;
@@ -632,7 +604,7 @@ namespace WebSockets {
                 case OPCODE_BINARY: {
                     if (receiving == FragmentedMessageType::None) {
                         if (fin) {
-                            OnBinaryMessage(data);
+                            OnBinaryMessage(std::move(data));
                         } else {
                             receiving = FragmentedMessageType::Binary;
                             messageReassemblyBuffer = data;
@@ -669,18 +641,18 @@ namespace WebSockets {
                 } break;
 
                 case OPCODE_PING: {
+                    SendFrame(true, OPCODE_PONG, data);
                     Event event;
                     event.type = Event::Type::Ping;
-                    event.content = data;
-                    eventQueue.push_back(std::move(event));
-                    SendFrame(true, OPCODE_PONG, data);
+                    event.content = std::move(data);
+                    eventQueue.push(std::move(event));
                 } break;
 
                 case OPCODE_PONG: {
                     Event event;
                     event.type = Event::Type::Pong;
-                    event.content = data;
-                    eventQueue.push_back(std::move(event));
+                    event.content = std::move(data);
+                    eventQueue.push(std::move(event));
                 } break;
 
                 default: {

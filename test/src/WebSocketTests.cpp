@@ -917,9 +917,9 @@ TEST_F(WebSocketTests, ReceiveText) {
     WebSockets::WebSocket::Delegates delegates;
     std::vector< std::string > texts;
     delegates.text = [&texts](
-        const std::string& data
+        std::string&& data
     ){
-        texts.push_back(data);
+        texts.push_back(std::move(data));
     };
     ws.SetDelegates(std::move(delegates));
     const std::string frame = "\x81\x06" "foobar";
@@ -947,9 +947,9 @@ TEST_F(WebSocketTests, ReceiveBinary) {
     std::vector< std::string > binaries;
     WebSockets::WebSocket::Delegates delegates;
     delegates.binary = [&binaries](
-        const std::string& data
+        std::string&& data
     ){
-        binaries.push_back(data);
+        binaries.push_back(std::move(data));
     };
     ws.SetDelegates(std::move(delegates));
     const std::string frame = "\x82\x06" "foobar";
@@ -985,9 +985,9 @@ TEST_F(WebSocketTests, ReceiveMasked) {
     WebSockets::WebSocket::Delegates delegates;
     std::vector< std::string > texts;
     delegates.text = [&texts](
-        const std::string& data
+        std::string&& data
     ){
-        texts.push_back(data);
+        texts.push_back(std::move(data));
     };
     ws.SetDelegates(std::move(delegates));
     const char mask[4] = {0x12, 0x34, 0x56, 0x78};
@@ -1053,9 +1053,9 @@ TEST_F(WebSocketTests, ReceiveFragmentedText) {
     WebSockets::WebSocket::Delegates delegates;
     std::vector< std::string > texts;
     delegates.text = [&texts](
-        const std::string& data
+        std::string&& data
     ){
-        texts.push_back(data);
+        texts.push_back(std::move(data));
     };
     ws.SetDelegates(std::move(delegates));
     const std::vector< std::string > frames{
@@ -1471,9 +1471,9 @@ TEST_F(WebSocketTests, GoodUtf8InTextSplitIntoFragments) {
     WebSockets::WebSocket::Delegates delegates;
     std::vector< std::string > texts;
     delegates.text = [&texts](
-        const std::string& data
+        std::string&& data
     ){
-        texts.push_back(data);
+        texts.push_back(std::move(data));
     };
     ws.SetDelegates(std::move(delegates));
     std::string frame = "\x01\x02\xF0\xA3";
@@ -1512,9 +1512,9 @@ TEST_F(WebSocketTests, BadUtf8TruncatedInTextSplitIntoFragments) {
     };
     std::vector< std::string > texts;
     delegates.text = [&texts](
-        const std::string& data
+        std::string&& data
     ){
-        texts.push_back(data);
+        texts.push_back(std::move(data));
     };
     ws.SetDelegates(std::move(delegates));
     std::string frame = "\x01\x02\xF0\xA3";
@@ -1574,9 +1574,9 @@ TEST_F(WebSocketTests, ReceiveTextAfterMoving) {
     WebSockets::WebSocket::Delegates delegates;
     std::vector< std::string > texts;
     delegates.text = [&texts](
-        const std::string& data
+        std::string&& data
     ){
-        texts.push_back(data);
+        texts.push_back(std::move(data));
     };
     ws.SetDelegates(std::move(delegates));
     WebSockets::WebSocket ws2(std::move(ws));
@@ -1605,9 +1605,9 @@ TEST_F(WebSocketTests, ReceiveTextBeforeRegisterringTextDelegate) {
     connection->dataReceivedDelegate({frame2.begin(), frame2.end()});
     WebSockets::WebSocket::Delegates delegates;
     delegates.text = [&texts](
-        const std::string& data
+        std::string&& data
     ){
-        texts.push_back(data);
+        texts.push_back(std::move(data));
     };
     ws.SetDelegates(std::move(delegates));
 
@@ -1669,9 +1669,9 @@ TEST_F(WebSocketTests, MessageDroppedIfNoDelegateRegisteredToReceiveIt) {
     std::vector< std::string > texts;
     delegates = WebSockets::WebSocket::Delegates();
     delegates.text = [&texts](
-        const std::string& data
+        std::string&& data
     ){
-        texts.push_back(data);
+        texts.push_back(std::move(data));
     };
     ws.SetDelegates(std::move(delegates));
 

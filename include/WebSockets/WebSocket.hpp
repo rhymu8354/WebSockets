@@ -53,7 +53,7 @@ namespace WebSockets {
          * @param[in] data
          *     This is the payload data from the received message.
          */
-        typedef std::function< void(const std::string& data) > MessageReceivedDelegate;
+        typedef std::function< void(std::string&& data) > MessageReceivedDelegate;
 
         /**
          * This is the type of function used to notify the user that
@@ -69,7 +69,7 @@ namespace WebSockets {
         typedef std::function<
             void(
                 unsigned int code,
-                const std::string& reason
+                std::string&& reason
             )
         > CloseReceivedDelegate;
 
