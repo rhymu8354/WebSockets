@@ -6,6 +6,7 @@ cmake_minimum_required(VERSION 3.8)
 set(This WebSocketsTests)
 
 set(Sources
+    src/MakeConnectionTests.cpp
     src/WebSocketTests.cpp
 )
 

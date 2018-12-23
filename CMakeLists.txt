@@ -6,10 +6,12 @@ cmake_minimum_required(VERSION 3.8)
 set(This WebSockets)
 
 set(Headers
+    include/WebSockets/MakeConnection.hpp
     include/WebSockets/WebSocket.hpp
 )
 
 set(Sources
+    src/MakeConnection.cpp
     src/WebSocket.cpp
 )
 
