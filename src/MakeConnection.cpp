@@ -7,8 +7,10 @@
  * © 2018 by Richard Walters
  */
 
+#include <condition_variable>
 #include <future>
 #include <Http/IClient.hpp>
+#include <mutex>
 #include <stdint.h>
 #include <string>
 #include <SystemAbstractions/DiagnosticsSender.hpp>
@@ -18,11 +20,55 @@
 namespace {
 
     /**
-     * This is the period between polling the abort promise when awaiting the
-     * completion of the HTTP client transaction when attempting to make a new
-     * connection.
+     * This holds variables that are shared between the MakeConnection
+     * function, MakeConnectionSynchronous function, and the delegates
+     * they hand out to be called when different events happen.
      */
-    constexpr std::chrono::milliseconds ABORT_POLLING_PERIOD = std::chrono::milliseconds(50);
+    struct MakeConnectionSharedContext {
+        // Properties
+
+        /**
+         * This is used to synchronize access to the structure.
+         */
+        std::mutex mutex;
+
+        /**
+         * This is used to signal MakeConnectionSynchronous to wake up,
+         * while it's waiting for the connection transaction to complete.
+         */
+        std::condition_variable connectionWaitDone;
+
+        /**
+         * This flag is set if the connection attempt should be aborted.
+         */
+        bool abortAttempt = false;
+
+        /**
+         * This flag is set if the connection attempt is completed.
+         */
+        bool transactionCompleted = false;
+
+        // Methods
+
+        /**
+         * This method blocks until either the connection attempt is aborted or
+         * completed.
+         *
+         * @return
+         *     An indication of whether or not the connection attempt was
+         *     aborted is returned.
+         */
+        bool Wait() {
+            std::unique_lock< decltype(mutex) > lock(mutex);
+            connectionWaitDone.wait(
+                lock,
+                [this]{
+                    return abortAttempt || transactionCompleted;
+                }
+            );
+            return !abortAttempt;
+        }
+    };
 
     /**
      * This method is called to synchronously attempt to connect to a web
@@ -41,8 +87,10 @@ namespace {
      * @param[in] diagnosticsSender
      *     This is the function to call to publish any diagnostic messages.
      *
-     * @param[in] aborted
-     *     This is a promise that is set if the connection attempt is aborted.
+     * @param[in] sharedContext
+     *     This olds variables that are shared between the MakeConnection
+     *     function, MakeConnectionSynchronous function, and the delegates
+     *     they hand out to be called when different events happen.
      *
      * @return
      *     The new WebSocket connection to the server is returned.
@@ -55,7 +103,7 @@ namespace {
         std::string host,
         uint16_t port,
         std::shared_ptr< SystemAbstractions::DiagnosticsSender > diagnosticsSender,
-        std::shared_ptr< std::promise< void > > aborted
+        std::shared_ptr< MakeConnectionSharedContext > sharedContext
     ) {
         diagnosticsSender->SendDiagnosticInformationString(
             2,
@@ -91,17 +139,19 @@ namespace {
                 }
             }
         );
-        // TODO: Remove polling once we can register a delegate with the
-        // transaction that is called upon completion.
-        auto wasAborted = aborted->get_future();
-        while (!transaction->AwaitCompletion(ABORT_POLLING_PERIOD)) {
-            if (wasAborted.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
-                diagnosticsSender->SendDiagnosticInformationString(
-                    SystemAbstractions::DiagnosticsSender::Levels::WARNING,
-                    "connection aborted"
-                );
-                return nullptr;
+        transaction->SetCompletionDelegate(
+            [sharedContext]{
+                std::lock_guard< decltype(sharedContext->mutex) > lock(sharedContext->mutex);
+                sharedContext->transactionCompleted = true;
+                sharedContext->connectionWaitDone.notify_one();
             }
+        );
+        if (!sharedContext->Wait()) {
+            diagnosticsSender->SendDiagnosticInformationString(
+                SystemAbstractions::DiagnosticsSender::Levels::WARNING,
+                "connection aborted"
+            );
+            return nullptr;
         }
         switch (transaction->state) {
             case Http::IClient::Transaction::State::Completed: {
@@ -170,6 +220,7 @@ namespace WebSockets {
         std::shared_ptr< SystemAbstractions::DiagnosticsSender > diagnosticsSender
     ) {
         MakeConnectionResults results;
+        const auto sharedContext = std::make_shared< MakeConnectionSharedContext >();
         const auto aborted = std::make_shared< std::promise< void > >();
         results.connectionFuture = std::async(
             std::launch::async,
@@ -178,10 +229,12 @@ namespace WebSockets {
             host,
             port,
             diagnosticsSender,
-            aborted
+            sharedContext
         );
-        results.abortConnection = [aborted]{
-            aborted->set_value();
+        results.abortConnection = [sharedContext]{
+            std::lock_guard< decltype(sharedContext->mutex) > lock(sharedContext->mutex);
+            sharedContext->abortAttempt = true;
+            sharedContext->connectionWaitDone.notify_one();
         };
         return results;
     }
