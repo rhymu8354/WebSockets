@@ -682,8 +682,11 @@ namespace WebSockets {
                 return;
             }
             if (
-                frameReassemblyBuffer.size() + data.size()
-                > configuration.maxFrameSize
+                (configuration.maxFrameSize > 0)
+                && (
+                    frameReassemblyBuffer.size() + data.size()
+                    > configuration.maxFrameSize
+                )
             ) {
                 Close(1002, "frame too large", true);
                 return;

@@ -53,8 +53,10 @@ namespace WebSockets {
             /**
              * This is the maximum allowed incoming frame size, beyond which
              * receipt of data causes an immediate drop of the connection.
+             *
+             * If zero, there is no limit.
              */
-            size_t maxFrameSize = 1024 * 128;
+            size_t maxFrameSize = 0;
         };
 
         /**
