@@ -779,6 +779,7 @@ namespace WebSockets {
     }
 
     void WebSocket::Configure(Configuration configuration) {
+        std::lock_guard< decltype(impl_->mutex) > lock(impl_->mutex);
         impl_->configuration = configuration;
     }
 
