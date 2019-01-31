@@ -190,6 +190,12 @@ namespace WebSockets {
         // Properties
 
         /**
+         * This holds onto variables which the user can change that modifies
+         * the behavior of the WebSocket.
+         */
+        Configuration configuration;
+
+        /**
          * This is a helper object used to generate and publish
          * diagnostic messages.
          */
@@ -675,6 +681,13 @@ namespace WebSockets {
             if (connection == nullptr) {
                 return;
             }
+            if (
+                frameReassemblyBuffer.size() + data.size()
+                > configuration.maxFrameSize
+            ) {
+                Close(1002, "frame too large", true);
+                return;
+            }
             (void)frameReassemblyBuffer.insert(
                 frameReassemblyBuffer.end(),
                 data.begin(),
@@ -760,6 +773,10 @@ namespace WebSockets {
         size_t minLevel
     ) {
         return impl_->diagnosticsSender.SubscribeToDiagnostics(delegate, minLevel);
+    }
+
+    void WebSocket::Configure(Configuration configuration) {
+        impl_->configuration = configuration;
     }
 
     void WebSocket::StartOpenAsClient(

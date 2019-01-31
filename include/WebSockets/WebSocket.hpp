@@ -45,6 +45,17 @@ namespace WebSockets {
             Server,
         };
 
+        /**
+         * This holds configurable variables that control the behavior of the
+         * WebSocket.
+         */
+        struct Configuration {
+            /**
+             * This is the maximum allowed incoming frame size, beyond which
+             * receipt of data causes an immediate drop of the connection.
+             */
+            size_t maxFrameSize = 1024 * 128;
+        };
 
         /**
          * This is the type of function used to publish messages received
@@ -144,6 +155,14 @@ namespace WebSockets {
             SystemAbstractions::DiagnosticsSender::DiagnosticMessageDelegate delegate,
             size_t minLevel = 0
         );
+
+        /**
+         * Set the configurable parameters of the WebSocket.
+         *
+         * @param[in] configuration
+         *     These are the configurable parameters to set for the WebSocket.
+         */
+        void Configure(Configuration configuration);
 
         /**
          * This method puts the WebSocket into the OPENING state,

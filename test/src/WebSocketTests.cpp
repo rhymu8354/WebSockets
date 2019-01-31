@@ -1678,3 +1678,35 @@ TEST_F(WebSocketTests, MessageDroppedIfNoDelegateRegisteredToReceiveIt) {
     // Assert
     EXPECT_EQ(0, texts.size());
 }
+
+TEST_F(WebSocketTests, DropConnectionIfFrameTooLarge) {
+    // Arrange
+    const auto connection = std::make_shared< MockConnection >();
+    WebSockets::WebSocket::Configuration configuration;
+    configuration.maxFrameSize = 7;
+    ws.Configure(configuration);
+    WebSockets::WebSocket::Delegates delegates;
+    unsigned int codeReceived;
+    std::string reasonReceived;
+    bool closeReceived = false;
+    delegates.close = [&codeReceived, &reasonReceived, &closeReceived](
+        unsigned int code,
+        const std::string& reason
+    ){
+        codeReceived = code;
+        reasonReceived = reason;
+        closeReceived = true;
+    };
+    ws.SetDelegates(std::move(delegates));
+    ws.Open(connection, WebSockets::WebSocket::Role::Client);
+
+    // Act
+    const std::string frame = "\x81\x06" "foobar";
+    connection->dataReceivedDelegate({frame.begin(), frame.end()});
+
+    // Assert
+    EXPECT_TRUE(connection->brokenByWebSocket);
+    EXPECT_TRUE(closeReceived);
+    EXPECT_EQ(1002, codeReceived);
+    EXPECT_EQ("frame too large", reasonReceived);
+}
