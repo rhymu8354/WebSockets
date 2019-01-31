@@ -92,6 +92,10 @@ namespace {
      *     function, MakeConnectionSynchronous function, and the delegates
      *     they hand out to be called when different events happen.
      *
+     * @param[in] webSocketConfiguration
+     *     This contains variables that are used to customize the behavior
+     *     of the WebSocket.
+     *
      * @return
      *     The new WebSocket connection to the server is returned.
      *
@@ -103,7 +107,8 @@ namespace {
         std::string host,
         uint16_t port,
         std::shared_ptr< SystemAbstractions::DiagnosticsSender > diagnosticsSender,
-        std::shared_ptr< MakeConnectionSharedContext > sharedContext
+        std::shared_ptr< MakeConnectionSharedContext > sharedContext,
+        WebSockets::WebSocket::Configuration webSocketConfiguration
     ) {
         diagnosticsSender->SendDiagnosticInformationString(
             2,
@@ -112,6 +117,7 @@ namespace {
 
         // Set up a client-side WebSocket and form the HTTP request for it.
         const auto ws = std::make_shared< WebSockets::WebSocket >();
+        ws->Configure(webSocketConfiguration);
         Http::Request request;
         request.method = "GET";
         request.target.SetScheme("ws");
@@ -217,7 +223,8 @@ namespace WebSockets {
         std::shared_ptr< Http::IClient > http,
         const std::string& host,
         uint16_t port,
-        std::shared_ptr< SystemAbstractions::DiagnosticsSender > diagnosticsSender
+        std::shared_ptr< SystemAbstractions::DiagnosticsSender > diagnosticsSender,
+        WebSocket::Configuration configuration
     ) {
         MakeConnectionResults results;
         const auto sharedContext = std::make_shared< MakeConnectionSharedContext >();
@@ -229,7 +236,8 @@ namespace WebSockets {
             host,
             port,
             diagnosticsSender,
-            sharedContext
+            sharedContext,
+            configuration
         );
         results.abortConnection = [sharedContext]{
             std::lock_guard< decltype(sharedContext->mutex) > lock(sharedContext->mutex);

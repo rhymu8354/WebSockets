@@ -56,6 +56,9 @@ namespace WebSockets {
      * @param[in] diagnosticsSender
      *     This is the object to use to publish any diagnostic messages.
      *
+     * @param[in] configuration
+     *     These are the configurable parameters to set for the WebSocket.
+     *
      * @return
      *     A structure is returned containing information and tools to
      *     use in coordinating with the asynchronous connection operation.
@@ -64,7 +67,8 @@ namespace WebSockets {
         std::shared_ptr< Http::IClient > http,
         const std::string& host,
         uint16_t port,
-        std::shared_ptr< SystemAbstractions::DiagnosticsSender > diagnosticsSender
+        std::shared_ptr< SystemAbstractions::DiagnosticsSender > diagnosticsSender,
+        WebSocket::Configuration configuration = WebSocket::Configuration()
     );
 
 }
