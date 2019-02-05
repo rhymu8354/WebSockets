@@ -1707,6 +1707,6 @@ TEST_F(WebSocketTests, DropConnectionIfFrameTooLarge) {
     // Assert
     EXPECT_TRUE(connection->brokenByWebSocket);
     EXPECT_TRUE(closeReceived);
-    EXPECT_EQ(1002, codeReceived);
+    EXPECT_EQ(1009, codeReceived);
     EXPECT_EQ("frame too large", reasonReceived);
 }

@@ -688,7 +688,7 @@ namespace WebSockets {
                     > configuration.maxFrameSize
                 )
             ) {
-                Close(1002, "frame too large", true);
+                Close(1009, "frame too large", true);
                 return;
             }
             (void)frameReassemblyBuffer.insert(
