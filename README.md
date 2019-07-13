@@ -27,7 +27,22 @@ There are two distinct steps in the build process:
 ### Prerequisites
 
 * [CMake](https://cmake.org/) version 3.8 or newer
-* C++11 toolchain compatible with CMake for your development platform (e.g. [Visual Studio](https://www.visualstudio.com/) on Windows)
+* C++11 toolchain compatible with CMake for your development platform (e.g.
+  [Visual Studio](https://www.visualstudio.com/) on Windows)
+* [Base64](https://github.com/rhymu8354/Base64.git) - a library which
+  implements encoding and decoding data using the Base64 algorithm, which
+  is defined in [RFC 4648](https://tools.ietf.org/html/rfc4648).
+* [Hash](https://github.com/rhymu8354/Hash.git) - a library which implements
+  various cryptographic hash and message digest functions.
+* [Http](https://github.com/rhymu8354/Http.git) - a library which implements
+  [RFC 7230](https://tools.ietf.org/html/rfc7230), "Hypertext Transfer Protocol
+  (HTTP/1.1): Message Syntax and Routing".
+* [SystemAbstractions](https://github.com/rhymu8354/SystemAbstractions.git) - a
+  cross-platform adapter library for system services whose APIs vary from one
+  operating system to another
+* [Utf8](https://github.com/rhymu8354/Utf8.git) - a library which implements
+  [RFC 3629](https://tools.ietf.org/html/rfc3629), "UTF-8 (Unicode
+  Transformation Format)".
 
 ### Build system generation
 
