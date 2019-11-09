@@ -26,6 +26,7 @@ target_link_libraries(${This} PUBLIC
     Base64
     Hash
     Http
+    StringExtensions
     SystemAbstractions
     Utf8
 )

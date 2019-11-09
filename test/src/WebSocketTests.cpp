@@ -15,8 +15,8 @@
 #include <Hash/Templates.hpp>
 #include <stddef.h>
 #include <string>
+#include <StringExtensions/StringExtensions.hpp>
 #include <SystemAbstractions/DiagnosticsSender.hpp>
-#include <SystemAbstractions/StringExtensions.hpp>
 #include <vector>
 #include <WebSockets/WebSocket.hpp>
 
@@ -143,7 +143,7 @@ struct WebSocketTests
                 std::string message
             ){
                 diagnosticMessages.push_back(
-                    SystemAbstractions::sprintf(
+                    StringExtensions::sprintf(
                         "%s[%zu]: %s",
                         senderName.c_str(),
                         level,
@@ -174,7 +174,7 @@ TEST_F(WebSocketTests, InitiateOpenAsClient) {
     );
     EXPECT_EQ(
         "websocket",
-        SystemAbstractions::ToLower(request.headers.GetHeaderValue("Upgrade"))
+        StringExtensions::ToLower(request.headers.GetHeaderValue("Upgrade"))
     );
     EXPECT_TRUE(request.headers.HasHeaderToken("Connection", "upgrade"));
 }
@@ -497,7 +497,7 @@ TEST_F(WebSocketTests, CompleteOpenAsServer) {
     EXPECT_EQ("Switching Protocols", response.reasonPhrase);
     EXPECT_EQ(
         "websocket",
-        SystemAbstractions::ToLower(response.headers.GetHeaderValue("Upgrade"))
+        StringExtensions::ToLower(response.headers.GetHeaderValue("Upgrade"))
     );
     EXPECT_TRUE(response.headers.HasHeaderToken("Connection", "upgrade"));
     EXPECT_EQ(

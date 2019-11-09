@@ -13,9 +13,9 @@
 #include <Hash/Templates.hpp>
 #include <queue>
 #include <stdint.h>
+#include <StringExtensions/StringExtensions.hpp>
 #include <SystemAbstractions/CryptoRandom.hpp>
 #include <SystemAbstractions/DiagnosticsSender.hpp>
-#include <SystemAbstractions/StringExtensions.hpp>
 #include <Utf8/Utf8.hpp>
 #include <vector>
 #include <WebSockets/WebSocket.hpp>
@@ -809,7 +809,7 @@ namespace WebSockets {
         if (!response.headers.HasHeaderToken("Connection", "upgrade")) {
             return false;
         }
-        if (SystemAbstractions::ToLower(response.headers.GetHeaderValue("Upgrade")) != "websocket") {
+        if (StringExtensions::ToLower(response.headers.GetHeaderValue("Upgrade")) != "websocket") {
             return false;
         }
         if (response.headers.GetHeaderValue("Sec-WebSocket-Accept") != ComputeKeyAnswer(impl_->key)) {
@@ -837,7 +837,7 @@ namespace WebSockets {
         if (!request.headers.HasHeaderToken("Connection", "upgrade")) {
             return false;
         }
-        if (SystemAbstractions::ToLower(request.headers.GetHeaderValue("Upgrade")) != "websocket") {
+        if (StringExtensions::ToLower(request.headers.GetHeaderValue("Upgrade")) != "websocket") {
             return false;
         }
         if (request.headers.GetHeaderValue("Sec-WebSocket-Version") != CURRENTLY_SUPPORTED_WEBSOCKET_VERSION) {

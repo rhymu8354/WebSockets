@@ -13,8 +13,8 @@
 #include <Hash/Templates.hpp>
 #include <Http/Connection.hpp>
 #include <Http/IClient.hpp>
+#include <StringExtensions/StringExtensions.hpp>
 #include <SystemAbstractions/DiagnosticsSender.hpp>
-#include <SystemAbstractions/StringExtensions.hpp>
 #include <WebSockets/MakeConnection.hpp>
 
 namespace {
@@ -221,7 +221,7 @@ struct MakeConnectionTests
                 std::string message
             ){
                 diagnosticMessages.push_back(
-                    SystemAbstractions::sprintf(
+                    StringExtensions::sprintf(
                         "%s[%zu]: %s",
                         senderName.c_str(),
                         level,
