@@ -1,23 +1,42 @@
-# WebSockets
+# WebSockets (websockets)
 
-This is a library which implements [RFC 6455](https://tools.ietf.org/html/rfc6455),
-"The WebSocket Protocol".
+This is a library which implements [RFC
+6455](https://tools.ietf.org/html/rfc6455), "The WebSocket Protocol".
 
-## Usage
+[![Crates.io](https://img.shields.io/crates/v/websockets.svg)](https://crates.io/crates/websockets)
+[![Documentation](https://docs.rs/websockets/badge.svg)][dox]
 
-The `WebSockets::WebSocket` class implements the WebSocket protocol, in either client or server role.
+More information about the Rust implementation of this library can be found in
+the [crate documentation][dox].
 
-## Supported platforms / recommended toolchains
+[dox]: https://docs.rs/websockets
 
-This is a portable C++11 library which depends only on the C++11 compiler and standard library, so it should be supported on almost any platform.  The following are recommended toolchains for popular platforms.
+The `WebSocket` type implements the WebSocket protocol, in either client or
+server role.
 
-* Windows -- [Visual Studio](https://www.visualstudio.com/) (Microsoft Visual C++)
+This is a multi-language library containing independent implementations
+for the following programming languages:
+
+* C++
+* Rust
+
+## Building the C++ Implementation
+
+A portable library is built which depends on the C++11 compiler, the C++
+standard library, and non-standard dependencies listed below.  It should be
+supported on almost any platform.  The following are recommended toolchains for
+popular platforms.
+
+* Windows -- [Visual Studio](https://www.visualstudio.com/) (Microsoft Visual
+  C++)
 * Linux -- clang or gcc
 * MacOS -- Xcode (clang)
 
 ## Building
 
-This library is not intended to stand alone.  It is intended to be included in a larger solution which uses [CMake](https://cmake.org/) to generate the build system and build applications which will link with the library.
+This library is not intended to stand alone.  It is intended to be included in
+a larger solution which uses [CMake](https://cmake.org/) to generate the build
+system and build applications which will link with the library.
 
 There are two distinct steps in the build process:
 
@@ -37,6 +56,9 @@ There are two distinct steps in the build process:
 * [Http](https://github.com/rhymu8354/Http.git) - a library which implements
   [RFC 7230](https://tools.ietf.org/html/rfc7230), "Hypertext Transfer Protocol
   (HTTP/1.1): Message Syntax and Routing".
+* [StringExtensions](https://github.com/rhymu8354/StringExtensions.git) - a
+  library containing C++ string-oriented libraries, many of which ought to be
+  in the standard library, but aren't.
 * [SystemAbstractions](https://github.com/rhymu8354/SystemAbstractions.git) - a
   cross-platform adapter library for system services whose APIs vary from one
   operating system to another

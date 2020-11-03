@@ -1,0 +1,27 @@
+[package]
+name = "websockets"
+version = "1.0.0"
+description = "Implementation of IETF RFC 6455, The WebSocket Protocol"
+authors = ["Richard Walters <rwalters@digitalstirling.com>"]
+edition = "2018"
+license-file = "LICENSE.txt"
+readme = "README.md"
+categories = ["web-programming"]
+keywords = ["websocket", "web"]
+repository = "https://github.com/rhymu8354/WebSockets.git"
+exclude = [
+    "*.hpp",
+    "*.cpp",
+    "CMakeLists.txt"
+]
+
+[dependencies]
+base64 = "0.13"
+futures = "0.3"
+rand = "0.7"
+rhymuweb = { path = "../Http" }
+thiserror = "1.0"
+
+[dependencies.sha1]
+version = "0.6"
+features = ["std"]
