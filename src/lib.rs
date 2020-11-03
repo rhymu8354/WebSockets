@@ -24,6 +24,11 @@ pub use rhymuweb::{
 // This is the version of the WebSocket protocol that this class supports.
 const CURRENTLY_SUPPORTED_WEBSOCKET_VERSION: &str = "13";
 
+// This is the required length of the Base64 decoding of the
+// "Sec-WebSocket-Key" header in HTTP requests that initiate a WebSocket
+// opening handshake.
+const REQUIRED_WEBSOCKET_KEY_LENGTH: usize = 16;
+
 // This is the string added to the "Sec-WebSocket-Key" before computing
 // the SHA-1 hash and Base64 encoding the result to form the
 // corresponding "Sec-WebSocket-Accept" value.
@@ -52,7 +57,7 @@ impl WebSocket {
             CURRENTLY_SUPPORTED_WEBSOCKET_VERSION,
         );
         let mut rng = StdRng::from_entropy();
-        let mut nonce = [0; 16];
+        let mut nonce = [0; REQUIRED_WEBSOCKET_KEY_LENGTH];
         rng.fill(&mut nonce);
         let key = base64::encode(nonce);
         request.headers.set_header("Sec-WebSocket-Key", &key);
@@ -64,16 +69,20 @@ impl WebSocket {
         request
     }
 
-    fn compute_key_answer(&self) -> Result<String, Error> {
-        self.key.as_deref().map_or(
-            Err(Error::HandshakeNotProperlyStarted),
-            |key| {
+    fn compute_key_answer(key: Option<&str>) -> Result<String, Error> {
+        key.as_deref().map_or(Err(Error::HandshakeNotProperlyStarted), |key| {
+            if base64::decode(key).map_err(Error::HandshakeKey)?.len()
+                == REQUIRED_WEBSOCKET_KEY_LENGTH
+            {
                 Ok(base64::encode(
                     sha1::Sha1::from(String::from(key) + WEBSOCKET_KEY_SALT)
-                        .hexdigest(),
+                        .digest()
+                        .bytes(),
                 ))
-            },
-        )
+            } else {
+                Err(Error::InvalidHandshakeRequest)
+            }
+        })
     }
 
     pub fn finish_open_as_client(
@@ -98,7 +107,7 @@ impl WebSocket {
             },
             _ if !matches!(
                 response.headers.header_value("Sec-WebSocket-Accept"),
-                Some(value) if value == self.compute_key_answer()?
+                Some(value) if value == Self::compute_key_answer(self.key.as_deref())?
             ) =>
             {
                 Err(Error::InvalidHandshakeResponse)
@@ -169,11 +178,11 @@ mod tests {
         }
     }
 
-    fn sha1<T>(bytes: T) -> String
+    fn sha1<T>(bytes: T) -> [u8; 20]
     where
         T: AsRef<[u8]>,
     {
-        sha1::Sha1::from(bytes).hexdigest()
+        sha1::Sha1::from(bytes).digest().bytes()
     }
 
     #[test]

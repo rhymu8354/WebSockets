@@ -41,4 +41,18 @@ pub enum Error {
     /// calling `start_open_as_client`.
     #[error("the handshake cannot be finished because it was never started")]
     HandshakeNotProperlyStarted,
+
+    /// The WebSocket could not be opened because the HTTP request in the
+    /// opening handshake did not contain a proper value for the
+    /// `Sec-WebSocket-Accept` header.
+    #[error("the upgrade request did not contain a proper `Sec-WebSocket-Accept` header")]
+    InvalidHandshakeRequest,
+
+    /// The WebSocket could not be opened because the HTTP request in the
+    /// opening handshake contained a value for the `Sec-WebSocket-Accept`
+    /// header which could not be Base64-decoded.
+    #[error(
+        "unable to decode the value for the `Sec-WebSocket-Accept` header"
+    )]
+    HandshakeKey(#[source] base64::DecodeError),
 }

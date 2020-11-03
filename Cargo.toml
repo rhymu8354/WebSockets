@@ -19,9 +19,6 @@ exclude = [
 base64 = "0.13"
 futures = "0.3"
 rand = "0.7"
+sha1 = "0.6"
 rhymuweb = { path = "../Http" }
 thiserror = "1.0"
-
-[dependencies.sha1]
-version = "0.6"
-features = ["std"]
