@@ -129,6 +129,50 @@ impl WebSocket {
             _ => Ok(()),
         }
     }
+
+    pub fn open_as_server(
+        &mut self,
+        connection: Box<dyn Connection>,
+        request: &Request,
+    ) -> Result<Response, Error> {
+        match request {
+            _ if request.method != "GET" => Err(Error::WrongHttpMethod),
+            _ if !request.headers.has_header_token("Connection", "upgrade") => {
+                Err(Error::UpgradeNotRequested)
+            },
+            _ if !matches!(
+                request.headers.header_value("Upgrade"),
+                Some(value) if value.eq_ignore_ascii_case("websocket")
+            ) =>
+            {
+                Err(Error::ProtocolUpgradeRequstNotAWebSocket)
+            },
+            _ if !matches!(
+                request.headers.header_value("Sec-WebSocket-Version"),
+                Some(value) if value == CURRENTLY_SUPPORTED_WEBSOCKET_VERSION
+            ) =>
+            {
+                Err(Error::UnsupportedProtocolVersion)
+            },
+            _ => {
+                let mut response = Response::new();
+                response.status_code = 101;
+                response.reason_phrase = "Switching Protocols".into();
+                response.headers.set_header("Connection", "upgrade");
+                response.headers.set_header("Upgrade", "websocket");
+                response.headers.set_header(
+                    "Sec-WebSocket-Accept",
+                    Self::compute_key_answer(
+                        request
+                            .headers
+                            .header_value("Sec-WebSocket-Key")
+                            .as_deref(),
+                    )?,
+                );
+                Ok(response)
+            },
+        }
+    }
 }
 
 #[cfg(test)]
@@ -446,5 +490,246 @@ mod tests {
         //         connection->webSocketOutput[6 + i]
         //     );
         // }
+    }
+
+    #[test]
+    fn complete_open_as_server() {
+        let mut ws = WebSocket::new();
+        let mut request = Request::new();
+        request.method = "GET".into();
+        request.headers.set_header("Connection", "upgrade");
+        request.headers.set_header("Upgrade", "websocket");
+        request.headers.set_header("Sec-WebSocket-Version", "13");
+        request
+            .headers
+            .set_header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==");
+        let connection = MockConnection::new();
+        let response = ws.open_as_server(Box::new(connection), &request);
+        assert!(response.is_ok());
+        let response = response.unwrap();
+        assert_eq!(101, response.status_code);
+        assert_eq!("Switching Protocols", response.reason_phrase);
+        assert_eq!(
+            Some("websocket"),
+            response.headers.header_value("Upgrade").as_deref()
+        );
+        assert!(response.headers.has_header_token("Connection", "upgrade"));
+        assert_eq!(
+            Some("s3pPLMBiTxaQ9kYGzzhZRbK+xOo="),
+            response.headers.header_value("Sec-WebSocket-Accept").as_deref()
+        );
+
+        // ws.Ping("Hello");
+        // ASSERT_EQ("\x89\x05Hello", connection->webSocketOutput);
+    }
+
+    #[test]
+    fn complete_open_as_server_connection_token_capitalized() {
+        let mut ws = WebSocket::new();
+        let mut request = Request::new();
+        request.method = "GET".into();
+        request.headers.set_header("Connection", "Upgrade");
+        request.headers.set_header("Upgrade", "websocket");
+        request.headers.set_header("Sec-WebSocket-Version", "13");
+        request
+            .headers
+            .set_header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==");
+        let connection = MockConnection::new();
+        let response = ws.open_as_server(Box::new(connection), &request);
+        assert!(response.is_ok());
+    }
+
+    #[test]
+    fn fail_complete_open_as_server_not_get_method() {
+        let mut ws = WebSocket::new();
+        let mut request = Request::new();
+        request.method = "POST".into();
+        request.headers.set_header("Connection", "Upgrade");
+        request.headers.set_header("Upgrade", "websocket");
+        request.headers.set_header("Sec-WebSocket-Version", "13");
+        request
+            .headers
+            .set_header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==");
+        let connection = MockConnection::new();
+        assert!(matches!(
+            ws.open_as_server(Box::new(connection), &request),
+            Err(Error::WrongHttpMethod)
+        ));
+    }
+
+    #[test]
+    fn fail_complete_open_as_server_missing_upgrade() {
+        let mut ws = WebSocket::new();
+        let mut request = Request::new();
+        request.method = "GET".into();
+        request.headers.set_header("Connection", "Upgrade");
+        request.headers.set_header("Sec-WebSocket-Version", "13");
+        request
+            .headers
+            .set_header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==");
+        let connection = MockConnection::new();
+        assert!(matches!(
+            ws.open_as_server(Box::new(connection), &request),
+            Err(Error::ProtocolUpgradeRequstNotAWebSocket)
+        ));
+    }
+
+    #[test]
+    fn fail_complete_open_as_server_wrong_upgrade() {
+        let mut ws = WebSocket::new();
+        let mut request = Request::new();
+        request.method = "GET".into();
+        request.headers.set_header("Connection", "Upgrade");
+        request.headers.set_header("Upgrade", "foobar");
+        request.headers.set_header("Sec-WebSocket-Version", "13");
+        request
+            .headers
+            .set_header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==");
+        let connection = MockConnection::new();
+        assert!(matches!(
+            ws.open_as_server(Box::new(connection), &request),
+            Err(Error::ProtocolUpgradeRequstNotAWebSocket)
+        ));
+    }
+
+    #[test]
+    fn fail_complete_open_as_server_missing_connection() {
+        let mut ws = WebSocket::new();
+        let mut request = Request::new();
+        request.method = "GET".into();
+        request.headers.set_header("Upgrade", "websocket");
+        request.headers.set_header("Sec-WebSocket-Version", "13");
+        request
+            .headers
+            .set_header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==");
+        let connection = MockConnection::new();
+        assert!(matches!(
+            ws.open_as_server(Box::new(connection), &request),
+            Err(Error::UpgradeNotRequested)
+        ));
+    }
+
+    #[test]
+    fn fail_complete_open_as_server_wrong_connection() {
+        let mut ws = WebSocket::new();
+        let mut request = Request::new();
+        request.method = "GET".into();
+        request.headers.set_header("Connection", "foobar");
+        request.headers.set_header("Upgrade", "websocket");
+        request.headers.set_header("Sec-WebSocket-Version", "13");
+        request
+            .headers
+            .set_header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==");
+        let connection = MockConnection::new();
+        assert!(matches!(
+            ws.open_as_server(Box::new(connection), &request),
+            Err(Error::UpgradeNotRequested)
+        ));
+    }
+
+    #[test]
+    fn fail_complete_open_as_server_missing_key() {
+        let mut ws = WebSocket::new();
+        let mut request = Request::new();
+        request.method = "GET".into();
+        request.headers.set_header("Connection", "upgrade");
+        request.headers.set_header("Upgrade", "websocket");
+        request.headers.set_header("Sec-WebSocket-Version", "13");
+        let connection = MockConnection::new();
+        assert!(matches!(
+            ws.open_as_server(Box::new(connection), &request),
+            Err(Error::HandshakeNotProperlyStarted)
+        ));
+    }
+
+    #[test]
+    fn fail_complete_open_as_server_bad_key() {
+        // Perform setup that's common for the three sub-cases.
+        let mut ws = WebSocket::new();
+        let mut request = Request::new();
+        request.method = "GET".into();
+        request.headers.set_header("Connection", "upgrade");
+        request.headers.set_header("Upgrade", "websocket");
+        request.headers.set_header("Sec-WebSocket-Version", "13");
+
+        // First try with a key that is one byte too short.
+        request
+            .headers
+            .set_header("Sec-WebSocket-Key", base64::encode("abcdefghijklmno"));
+        let connection = MockConnection::new();
+        assert!(matches!(
+            ws.open_as_server(Box::new(connection), &request),
+            Err(Error::InvalidHandshakeRequest)
+        ));
+
+        // Next try with a key that is one byte too long.
+        request.headers.set_header(
+            "Sec-WebSocket-Key",
+            base64::encode("abcdefghijklmnopq"),
+        );
+        let connection = MockConnection::new();
+        assert!(matches!(
+            ws.open_as_server(Box::new(connection), &request),
+            Err(Error::InvalidHandshakeRequest)
+        ));
+
+        // Finally try with a key that is just right.
+        request.headers.set_header(
+            "Sec-WebSocket-Key",
+            base64::encode("abcdefghijklmnop"),
+        );
+        let connection = MockConnection::new();
+        assert!(ws.open_as_server(Box::new(connection), &request).is_ok());
+    }
+
+    #[test]
+    fn fail_complete_open_as_server_missing_version() {
+        let mut ws = WebSocket::new();
+        let mut request = Request::new();
+        request.method = "GET".into();
+        request.headers.set_header("Connection", "upgrade");
+        request.headers.set_header("Upgrade", "websocket");
+        request
+            .headers
+            .set_header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==");
+        let connection = MockConnection::new();
+        assert!(matches!(
+            ws.open_as_server(Box::new(connection), &request),
+            Err(Error::UnsupportedProtocolVersion)
+        ));
+    }
+
+    #[test]
+    fn fail_complete_open_as_server_bad_version() {
+        // Perform setup that's common for the three sub-cases.
+        let mut ws = WebSocket::new();
+        let mut request = Request::new();
+        request.method = "GET".into();
+        request.headers.set_header("Connection", "upgrade");
+        request.headers.set_header("Upgrade", "websocket");
+        request
+            .headers
+            .set_header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==");
+
+        // First, try a version that's too old.
+        request.headers.set_header("Sec-WebSocket-Version", "12");
+        let connection = MockConnection::new();
+        assert!(matches!(
+            ws.open_as_server(Box::new(connection), &request),
+            Err(Error::UnsupportedProtocolVersion)
+        ));
+
+        // Next, try a version that's too new.
+        request.headers.set_header("Sec-WebSocket-Version", "14");
+        let connection = MockConnection::new();
+        assert!(matches!(
+            ws.open_as_server(Box::new(connection), &request),
+            Err(Error::UnsupportedProtocolVersion)
+        ));
+
+        // Finally, try a version that's supported.
+        request.headers.set_header("Sec-WebSocket-Version", "13");
+        let connection = MockConnection::new();
+        assert!(ws.open_as_server(Box::new(connection), &request).is_ok());
     }
 }

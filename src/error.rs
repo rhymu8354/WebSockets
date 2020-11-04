@@ -37,10 +37,37 @@ pub enum Error {
     #[error("the upgrade response indicated a subprotocol we did not request")]
     SubprotocolNotRequested,
 
-    /// This happens if `finish_open_as_client` is called without first
-    /// calling `start_open_as_client`.
+    /// For a client WebSocket, this happens if `finish_open_as_client` is
+    /// called without first calling `start_open_as_client`.
+    ///
+    /// For a server WebSocket, this happens if the client did not provide
+    /// any value for the `Sec-WebSocket-Key` header.
     #[error("the handshake cannot be finished because it was never started")]
     HandshakeNotProperlyStarted,
+
+    /// The WebSocket could not be opened because the HTTP request in the
+    /// opening handshake did not use the `GET` method.
+    #[error(
+        "the client used the wrong method in the handshake request (not GET)"
+    )]
+    WrongHttpMethod,
+
+    /// The WebSocket could not be opened because the HTTP request in the
+    /// opening handshake did not request upgrading the connection.
+    #[error("the upgrade request did not indicate that the connection should be upgraded")]
+    UpgradeNotRequested,
+
+    /// The WebSocket could not be opened because the HTTP request in the
+    /// opening handshake did not indicate that the connection should be
+    /// upgraded to a WebSocket.
+    #[error("the upgrade request did not indicate that the connection should be upgraded to be a WebSocket")]
+    ProtocolUpgradeRequstNotAWebSocket,
+
+    /// The WebSocket could not be opened because the HTTP request in the
+    /// opening handshake requested an unsupported version of the WebSocket
+    /// protocol.
+    #[error("an unsupported version of the WebSocket protocol was requested")]
+    UnsupportedProtocolVersion,
 
     /// The WebSocket could not be opened because the HTTP request in the
     /// opening handshake did not contain a proper value for the
