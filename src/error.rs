@@ -82,4 +82,8 @@ pub enum Error {
         "unable to decode the value for the `Sec-WebSocket-Accept` header"
     )]
     HandshakeKey(#[source] base64::DecodeError),
+
+    /// The underlying network connection was broken.
+    #[error("the underlying network connection was broken")]
+    ConnectionBroken(#[source] std::io::Error),
 }

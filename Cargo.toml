@@ -22,3 +22,6 @@ rand = "0.7"
 sha1 = "0.6"
 rhymuweb = { path = "../Http" }
 thiserror = "1.0"
+
+[dev-dependencies]
+async-std = "1.6"
