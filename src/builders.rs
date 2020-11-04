@@ -177,55 +177,10 @@ impl WebSocketServerBuilder {
 }
 
 #[cfg(test)]
+#[allow(clippy::string_lit_as_bytes)]
 mod tests {
     use super::*;
-    use futures::{
-        AsyncRead,
-        AsyncWrite,
-    };
-
-    #[derive(Default)]
-    struct MockConnection {}
-
-    impl MockConnection {
-        fn new() -> Self {
-            Self {}
-        }
-    }
-
-    impl AsyncRead for MockConnection {
-        fn poll_read(
-            self: std::pin::Pin<&mut Self>,
-            _cx: &mut std::task::Context<'_>,
-            _buf: &mut [u8],
-        ) -> std::task::Poll<std::io::Result<usize>> {
-            std::task::Poll::Pending
-        }
-    }
-
-    impl AsyncWrite for MockConnection {
-        fn poll_write(
-            self: std::pin::Pin<&mut Self>,
-            _cx: &mut std::task::Context<'_>,
-            _buf: &[u8],
-        ) -> std::task::Poll<std::io::Result<usize>> {
-            std::task::Poll::Pending
-        }
-
-        fn poll_flush(
-            self: std::pin::Pin<&mut Self>,
-            _cx: &mut std::task::Context<'_>,
-        ) -> std::task::Poll<std::io::Result<()>> {
-            std::task::Poll::Pending
-        }
-
-        fn poll_close(
-            self: std::pin::Pin<&mut Self>,
-            _cx: &mut std::task::Context<'_>,
-        ) -> std::task::Poll<std::io::Result<()>> {
-            std::task::Poll::Pending
-        }
-    }
+    use crate::mock_connection::MockConnection;
 
     fn sha1<T>(bytes: T) -> [u8; 20]
     where
@@ -264,7 +219,7 @@ mod tests {
                     + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11",
             )),
         );
-        let connection = MockConnection::new();
+        let (connection, _back_end) = MockConnection::new();
         assert!(matches!(
             ws.finish_open(Box::new(connection), &response),
             Err(Error::ProtocolNotUpgradedToWebSocket)
@@ -285,7 +240,7 @@ mod tests {
                     + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11",
             )),
         );
-        let connection = MockConnection::new();
+        let (connection, _back_end) = MockConnection::new();
         assert!(matches!(
             ws.finish_open(Box::new(connection), &response),
             Err(Error::ProtocolNotUpgradedToWebSocket)
@@ -305,7 +260,7 @@ mod tests {
                     + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11",
             )),
         );
-        let connection = MockConnection::new();
+        let (connection, _back_end) = MockConnection::new();
         assert!(matches!(
             ws.finish_open(Box::new(connection), &response),
             Err(Error::ConnectionNotUpgraded)
@@ -326,7 +281,7 @@ mod tests {
                     + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11",
             )),
         );
-        let connection = MockConnection::new();
+        let (connection, _back_end) = MockConnection::new();
         assert!(matches!(
             ws.finish_open(Box::new(connection), &response),
             Err(Error::ConnectionNotUpgraded)
@@ -340,7 +295,7 @@ mod tests {
         response.status_code = 101;
         response.headers.set_header("Connection", "upgrade");
         response.headers.set_header("Upgrade", "websocket");
-        let connection = MockConnection::new();
+        let (connection, _back_end) = MockConnection::new();
         assert!(matches!(
             ws.finish_open(Box::new(connection), &response),
             Err(Error::InvalidHandshakeResponse)
@@ -361,7 +316,7 @@ mod tests {
                     + "258EAFA5-E914-47DA-95CA-C5AB0DC85B12",
             )),
         );
-        let connection = MockConnection::new();
+        let (connection, _back_end) = MockConnection::new();
         assert!(matches!(
             ws.finish_open(Box::new(connection), &response),
             Err(Error::InvalidHandshakeResponse)
@@ -383,7 +338,7 @@ mod tests {
             )),
         );
         response.headers.set_header("Sec-WebSocket-Extensions", "foobar");
-        let connection = MockConnection::new();
+        let (connection, _back_end) = MockConnection::new();
         assert!(matches!(
             ws.finish_open(Box::new(connection), &response),
             Err(Error::ExtensionNotRequested)
@@ -405,7 +360,7 @@ mod tests {
             )),
         );
         response.headers.set_header("Sec-WebSocket-Extensions", "");
-        let connection = MockConnection::new();
+        let (connection, _back_end) = MockConnection::new();
         assert!(ws.finish_open(Box::new(connection), &response).is_ok());
     }
 
@@ -424,7 +379,7 @@ mod tests {
             )),
         );
         response.headers.set_header("Sec-WebSocket-Protocol", "foobar");
-        let connection = MockConnection::new();
+        let (connection, _back_end) = MockConnection::new();
         assert!(matches!(
             ws.finish_open(Box::new(connection), &response),
             Err(Error::SubprotocolNotRequested)
@@ -446,13 +401,16 @@ mod tests {
             )),
         );
         response.headers.set_header("Sec-WebSocket-Protocol", "");
-        let connection = MockConnection::new();
+        let (connection, _back_end) = MockConnection::new();
         assert!(ws.finish_open(Box::new(connection), &response).is_ok());
     }
 
     #[test]
     fn complete_open_as_client() {
+        // Make a WebSocket client builder and handshake request.
         let (mut ws, request) = WebSocketClientBuilder::start_open();
+
+        // Construct a proper handshake response.
         let mut response = Response::new();
         response.status_code = 101;
         response.headers.set_header("Connection", "upgrade");
@@ -464,23 +422,33 @@ mod tests {
                     + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11",
             )),
         );
-        let connection = MockConnection::new();
-        assert!(ws.finish_open(Box::new(connection), &response).is_ok());
 
-        // const std::string data = "Hello";
-        // ws.Ping(data);
-        // ASSERT_EQ(data.length() + 6, connection->webSocketOutput.length());
-        // ASSERT_EQ("\x89\x85", connection->webSocketOutput.substr(0, 2));
-        // for (size_t i = 0; i < data.length(); ++i) {
-        //     ASSERT_EQ(
-        //         data[i] ^ connection->webSocketOutput[2 + (i % 4)],
-        //         connection->webSocketOutput[6 + i]
-        //     );
-        // }
+        // Build the WebSocket using the builder and handshake response.
+        let (connection, mut back_end) = MockConnection::new();
+        let open_result = ws.finish_open(Box::new(connection), &response);
+        assert!(open_result.is_ok());
+        let mut ws = open_result.unwrap();
+
+        // Use the WebSocket to confirm it's using the connection
+        // that we gave to the builder.
+        let data = "Hello".as_bytes();
+        ws.ping(data);
+        let web_socket_output = back_end.web_socket_output();
+        assert!(web_socket_output.is_some());
+        let web_socket_output = web_socket_output.unwrap();
+        assert_eq!(data.len() + 6, web_socket_output.len());
+        assert_eq!(&b"\x89\x85"[..], &web_socket_output[0..2]);
+        for (i, byte) in data.iter().enumerate() {
+            assert_eq!(
+                byte ^ web_socket_output[2 + (i % 4)],
+                web_socket_output[6 + i]
+            );
+        }
     }
 
     #[test]
     fn complete_open_as_server() {
+        // Construct handshake request.
         let mut request = Request::new();
         request.method = "GET".into();
         request.headers.set_header("Connection", "upgrade");
@@ -489,11 +457,15 @@ mod tests {
         request
             .headers
             .set_header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==");
-        let connection = MockConnection::new();
+
+        // Open the WebSocket and produce the handshake result.
+        let (connection, mut back_end) = MockConnection::new();
         let open_result =
             WebSocketServerBuilder::open(Box::new(connection), &request);
         assert!(open_result.is_ok());
-        let (_ws, response) = open_result.unwrap();
+        let (mut ws, response) = open_result.unwrap();
+
+        // Verify the response.
         assert_eq!(101, response.status_code);
         assert_eq!("Switching Protocols", response.reason_phrase);
         assert_eq!(
@@ -506,8 +478,13 @@ mod tests {
             response.headers.header_value("Sec-WebSocket-Accept").as_deref()
         );
 
-        // ws.Ping("Hello");
-        // ASSERT_EQ("\x89\x05Hello", connection->webSocketOutput);
+        // Use the WebSocket to confirm it's using the connection
+        // that we gave to the builder.
+        ws.ping("Hello");
+        assert_eq!(
+            Some(&b"\x89\x05Hello"[..]),
+            back_end.web_socket_output().as_deref()
+        );
     }
 
     #[test]
@@ -520,7 +497,7 @@ mod tests {
         request
             .headers
             .set_header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==");
-        let connection = MockConnection::new();
+        let (connection, _back_end) = MockConnection::new();
         let open_result =
             WebSocketServerBuilder::open(Box::new(connection), &request);
         assert!(open_result.is_ok());
@@ -536,7 +513,7 @@ mod tests {
         request
             .headers
             .set_header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==");
-        let connection = MockConnection::new();
+        let (connection, _back_end) = MockConnection::new();
         assert!(matches!(
             WebSocketServerBuilder::open(Box::new(connection), &request),
             Err(Error::WrongHttpMethod)
@@ -552,7 +529,7 @@ mod tests {
         request
             .headers
             .set_header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==");
-        let connection = MockConnection::new();
+        let (connection, _back_end) = MockConnection::new();
         assert!(matches!(
             WebSocketServerBuilder::open(Box::new(connection), &request),
             Err(Error::ProtocolUpgradeRequstNotAWebSocket)
@@ -569,7 +546,7 @@ mod tests {
         request
             .headers
             .set_header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==");
-        let connection = MockConnection::new();
+        let (connection, _back_end) = MockConnection::new();
         assert!(matches!(
             WebSocketServerBuilder::open(Box::new(connection), &request),
             Err(Error::ProtocolUpgradeRequstNotAWebSocket)
@@ -585,7 +562,7 @@ mod tests {
         request
             .headers
             .set_header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==");
-        let connection = MockConnection::new();
+        let (connection, _back_end) = MockConnection::new();
         assert!(matches!(
             WebSocketServerBuilder::open(Box::new(connection), &request),
             Err(Error::UpgradeNotRequested)
@@ -602,7 +579,7 @@ mod tests {
         request
             .headers
             .set_header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==");
-        let connection = MockConnection::new();
+        let (connection, _back_end) = MockConnection::new();
         assert!(matches!(
             WebSocketServerBuilder::open(Box::new(connection), &request),
             Err(Error::UpgradeNotRequested)
@@ -616,7 +593,7 @@ mod tests {
         request.headers.set_header("Connection", "upgrade");
         request.headers.set_header("Upgrade", "websocket");
         request.headers.set_header("Sec-WebSocket-Version", "13");
-        let connection = MockConnection::new();
+        let (connection, _back_end) = MockConnection::new();
         assert!(matches!(
             WebSocketServerBuilder::open(Box::new(connection), &request),
             Err(Error::HandshakeNotProperlyStarted)
@@ -636,7 +613,7 @@ mod tests {
         request
             .headers
             .set_header("Sec-WebSocket-Key", base64::encode("abcdefghijklmno"));
-        let connection = MockConnection::new();
+        let (connection, _back_end) = MockConnection::new();
         assert!(matches!(
             WebSocketServerBuilder::open(Box::new(connection), &request),
             Err(Error::InvalidHandshakeRequest)
@@ -647,7 +624,7 @@ mod tests {
             "Sec-WebSocket-Key",
             base64::encode("abcdefghijklmnopq"),
         );
-        let connection = MockConnection::new();
+        let (connection, _back_end) = MockConnection::new();
         assert!(matches!(
             WebSocketServerBuilder::open(Box::new(connection), &request),
             Err(Error::InvalidHandshakeRequest)
@@ -658,7 +635,7 @@ mod tests {
             "Sec-WebSocket-Key",
             base64::encode("abcdefghijklmnop"),
         );
-        let connection = MockConnection::new();
+        let (connection, _back_end) = MockConnection::new();
         assert!(WebSocketServerBuilder::open(Box::new(connection), &request)
             .is_ok());
     }
@@ -672,7 +649,7 @@ mod tests {
         request
             .headers
             .set_header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==");
-        let connection = MockConnection::new();
+        let (connection, _back_end) = MockConnection::new();
         assert!(matches!(
             WebSocketServerBuilder::open(Box::new(connection), &request),
             Err(Error::UnsupportedProtocolVersion)
@@ -692,7 +669,7 @@ mod tests {
 
         // First, try a version that's too old.
         request.headers.set_header("Sec-WebSocket-Version", "12");
-        let connection = MockConnection::new();
+        let (connection, _back_end) = MockConnection::new();
         assert!(matches!(
             WebSocketServerBuilder::open(Box::new(connection), &request),
             Err(Error::UnsupportedProtocolVersion)
@@ -700,7 +677,7 @@ mod tests {
 
         // Next, try a version that's too new.
         request.headers.set_header("Sec-WebSocket-Version", "14");
-        let connection = MockConnection::new();
+        let (connection, _back_end) = MockConnection::new();
         assert!(matches!(
             WebSocketServerBuilder::open(Box::new(connection), &request),
             Err(Error::UnsupportedProtocolVersion)
@@ -708,7 +685,7 @@ mod tests {
 
         // Finally, try a version that's supported.
         request.headers.set_header("Sec-WebSocket-Version", "13");
-        let connection = MockConnection::new();
+        let (connection, _back_end) = MockConnection::new();
         assert!(WebSocketServerBuilder::open(Box::new(connection), &request)
             .is_ok());
     }

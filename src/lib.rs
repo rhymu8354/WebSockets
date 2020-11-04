@@ -6,6 +6,7 @@
 
 mod builders;
 mod error;
+mod mock_connection;
 mod web_socket;
 
 pub use builders::{

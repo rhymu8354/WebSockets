@@ -140,8 +140,6 @@ async fn handle_message(
     mask_direction: MaskDirection,
 ) -> Result<(), ()> {
     match message {
-        // We already handled `Exit` in the `take_while` above;
-        // it causes the stream to end early so we won't get this far.
         WorkerMessage::Exit => Err(()),
 
         WorkerMessage::Send {
@@ -176,14 +174,10 @@ async fn worker(
     let connection = RefCell::new(connection);
     let rng = RefCell::new(StdRng::from_entropy());
     work_in_receiver
-        // The special `Exit` message completes the stream.
         .map(Ok)
-        .try_for_each(|message| handle_message(
-            message,
-            &connection,
-            &rng,
-            mask_direction
-        ))
+        .try_for_each(|message| {
+            handle_message(message, &connection, &rng, mask_direction)
+        })
         .await
         .unwrap_or(());
     println!("worker: exiting");
@@ -275,85 +269,7 @@ impl Drop for WebSocket {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use async_std::future::timeout;
-    use futures::{
-        AsyncRead,
-        AsyncWrite,
-    };
-
-    struct MockConnectionBackEnd {
-        receiver: Option<mpsc::UnboundedReceiver<Vec<u8>>>,
-    }
-
-    impl MockConnectionBackEnd {
-        fn web_socket_output(&mut self) -> Option<Vec<u8>> {
-            executor::block_on(async {
-                let mut receiver = self.receiver.take().unwrap();
-                let result = timeout(
-                    std::time::Duration::from_millis(200),
-                    receiver.next(),
-                )
-                .await;
-                self.receiver.replace(receiver);
-                result.unwrap_or(None)
-            })
-        }
-    }
-
-    struct MockConnection {
-        sender: mpsc::UnboundedSender<Vec<u8>>,
-    }
-
-    impl MockConnection {
-        fn new() -> (Self, MockConnectionBackEnd) {
-            let (sender, receiver) = mpsc::unbounded();
-            (
-                Self {
-                    sender,
-                },
-                MockConnectionBackEnd {
-                    receiver: Some(receiver),
-                },
-            )
-        }
-    }
-
-    impl AsyncRead for MockConnection {
-        fn poll_read(
-            self: std::pin::Pin<&mut Self>,
-            _cx: &mut std::task::Context<'_>,
-            _buf: &mut [u8],
-        ) -> std::task::Poll<std::io::Result<usize>> {
-            std::task::Poll::Pending
-        }
-    }
-
-    impl AsyncWrite for MockConnection {
-        fn poll_write(
-            self: std::pin::Pin<&mut Self>,
-            _cx: &mut std::task::Context<'_>,
-            buf: &[u8],
-        ) -> std::task::Poll<std::io::Result<usize>> {
-            let num_bytes = buf.len();
-            self.sender.unbounded_send(buf.into()).unwrap_or(());
-            std::task::Poll::Ready(Ok(num_bytes))
-        }
-
-        fn poll_flush(
-            self: std::pin::Pin<&mut Self>,
-            _cx: &mut std::task::Context<'_>,
-        ) -> std::task::Poll<std::io::Result<()>> {
-            std::task::Poll::Pending
-        }
-
-        fn poll_close(
-            self: std::pin::Pin<&mut Self>,
-            _cx: &mut std::task::Context<'_>,
-        ) -> std::task::Poll<std::io::Result<()>> {
-            std::task::Poll::Pending
-        }
-    }
+    use crate::mock_connection::MockConnection;
 
     #[test]
     fn server_send_ping_normal_with_data() {
