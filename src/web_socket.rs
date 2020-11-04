@@ -5,9 +5,11 @@ use super::{
 use futures::{
     channel::mpsc,
     executor,
-    future,
+    stream::{
+        StreamExt,
+        TryStreamExt,
+    },
     AsyncWriteExt,
-    StreamExt,
 };
 use rand::{
     rngs::StdRng,
@@ -136,11 +138,11 @@ async fn handle_message(
     connection: &RefCell<Box<dyn Connection>>,
     rng: &RefCell<StdRng>,
     mask_direction: MaskDirection,
-) -> bool {
+) -> Result<(), ()> {
     match message {
         // We already handled `Exit` in the `take_while` above;
         // it causes the stream to end early so we won't get this far.
-        WorkerMessage::Exit => false,
+        WorkerMessage::Exit => Err(()),
 
         WorkerMessage::Send {
             set_fin,
@@ -157,7 +159,7 @@ async fn handle_message(
                 &mut rng.borrow_mut(),
             )
             .await
-            .is_ok()
+            .map_err(|_| ())
         },
     }
 }
@@ -175,15 +177,15 @@ async fn worker(
     let rng = RefCell::new(StdRng::from_entropy());
     work_in_receiver
         // The special `Exit` message completes the stream.
-        .then(|message| handle_message(
+        .map(Ok)
+        .try_for_each(|message| handle_message(
             message,
             &connection,
             &rng,
             mask_direction
         ))
-        .take_while(|not_done| future::ready(*not_done))
-        .fold((), |_, _| async {})
-        .await;
+        .await
+        .unwrap_or(());
     println!("worker: exiting");
 }
 
