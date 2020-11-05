@@ -73,6 +73,12 @@ enum SetFin {
     No,
 }
 
+#[derive(Clone, Copy)]
+pub enum LastFragment {
+    Yes,
+    No,
+}
+
 enum WorkerMessage {
     // This tells the worker thread to terminate.
     Exit,
@@ -230,6 +236,8 @@ async fn receive_bytes(
     Ok(())
 }
 
+// TODO: Refactor this function so we don't need to
+#[allow(clippy::too_many_lines)]
 fn receive_frame(
     message_reassembly_buffer: &mut Vec<u8>,
     frame_reassembly_buffer: &[u8],
@@ -251,7 +259,7 @@ fn receive_frame(
 
     // Decode the FIN flag.
     //
-    // let fin = (frame_reassembly_buffer[0] & FIN) != 0;
+    let fin = (frame_reassembly_buffer[0] & FIN) != 0;
 
     // Decode the reserved bits, and reject the frame if any are set.
     let reserved_bits = (frame_reassembly_buffer[0] >> 4) & 0x07;
@@ -301,9 +309,43 @@ fn receive_frame(
     // * The type of message.
     let opcode = frame_reassembly_buffer[0] & 0x0F;
     match opcode {
+        OPCODE_TEXT => {
+            println!(
+                "receive_frame: TEXT(\"{}\")",
+                String::from_utf8_lossy(payload)
+            );
+            let payload = std::str::from_utf8(payload).map_err(Error::Utf8)?;
+            let mut received_messages = received_messages
+                .lock()
+                .expect("the last holder of the received messages panicked");
+            received_messages
+                .queue
+                .push_back(Message::Text(String::from(payload)));
+            if let Some(waker) = received_messages.waker.take() {
+                waker.wake();
+            }
+            Ok(())
+        },
+
+        OPCODE_BINARY => {
+            println!(
+                "receive_frame: BINARY(\"{}\")",
+                String::from_utf8_lossy(payload)
+            );
+            let payload = payload.to_vec();
+            let mut received_messages = received_messages
+                .lock()
+                .expect("the last holder of the received messages panicked");
+            received_messages.queue.push_back(Message::Binary(payload));
+            if let Some(waker) = received_messages.waker.take() {
+                waker.wake();
+            }
+            Ok(())
+        },
+
         OPCODE_PING => {
             println!(
-                "receive_frame: PING({})",
+                "receive_frame: PING(\"{}\")",
                 String::from_utf8_lossy(payload)
             );
             // TODO: Check to see if we should verify FIN is set.
@@ -321,6 +363,25 @@ fn receive_frame(
                 .lock()
                 .expect("the last holder of the received messages panicked");
             received_messages.queue.push_back(Message::Ping(payload));
+            if let Some(waker) = received_messages.waker.take() {
+                waker.wake();
+            }
+            Ok(())
+        },
+
+        OPCODE_PONG => {
+            println!(
+                "receive_frame: PONG(\"{}\")",
+                String::from_utf8_lossy(payload)
+            );
+            // TODO: Check to see if we should verify FIN is set.
+            // It doesn't make any sense for it to be clear, since a ping
+            // frame can never be fragmented.
+            let payload = payload.to_vec();
+            let mut received_messages = received_messages
+                .lock()
+                .expect("the last holder of the received messages panicked");
+            received_messages.queue.push_back(Message::Pong(payload));
             if let Some(waker) = received_messages.waker.take() {
                 waker.wake();
             }
@@ -504,8 +565,15 @@ struct ReceivedMessages {
     waker: Option<Waker>,
 }
 
+enum MessageInProgress {
+    None,
+    Text,
+    Binary,
+}
+
 #[must_use]
 pub struct WebSocket {
+    message_in_progress: MessageInProgress,
     received_messages: Arc<Mutex<ReceivedMessages>>,
 
     // This sender is used to deliver messages to the worker thread.
@@ -535,6 +603,7 @@ impl WebSocket {
         // Store the sender end of the channel and spawn the worker thread,
         // giving it the receiver end as well as the connection.
         Self {
+            message_in_progress: MessageInProgress::None,
             received_messages: received_messages.clone(),
             work_in: sender.clone(),
             worker: Some(thread::spawn(move || {
@@ -566,12 +635,72 @@ impl WebSocket {
         }
     }
 
-    fn send_frame(
+    pub fn text<T>(
+        &mut self,
+        data: T,
+        last_fragment: LastFragment,
+    ) -> Result<(), Error>
+    where
+        T: AsRef<str>,
+    {
+        let data = data.as_ref();
+        let (opcode, set_fin) = match (&self.message_in_progress, last_fragment)
+        {
+            (MessageInProgress::Binary, _) => Err(Error::LastMessageIncomplete),
+            (MessageInProgress::None, LastFragment::Yes) => {
+                Ok((OPCODE_TEXT, SetFin::Yes))
+            },
+            (MessageInProgress::None, LastFragment::No) => {
+                Ok((OPCODE_TEXT, SetFin::No))
+            },
+            (MessageInProgress::Text, LastFragment::Yes) => {
+                Ok((OPCODE_CONTINUATION, SetFin::Yes))
+            },
+            (MessageInProgress::Text, LastFragment::No) => {
+                Ok((OPCODE_CONTINUATION, SetFin::No))
+            },
+        }?;
+        self.send_frame(set_fin, opcode, data.as_bytes());
+        Ok(())
+    }
+
+    pub fn binary<T>(
+        &mut self,
+        data: T,
+        last_fragment: LastFragment,
+    ) -> Result<(), Error>
+    where
+        T: AsRef<[u8]>,
+    {
+        let data = data.as_ref();
+        let (opcode, set_fin) = match (&self.message_in_progress, last_fragment)
+        {
+            (MessageInProgress::Text, _) => Err(Error::LastMessageIncomplete),
+            (MessageInProgress::None, LastFragment::Yes) => {
+                Ok((OPCODE_BINARY, SetFin::Yes))
+            },
+            (MessageInProgress::None, LastFragment::No) => {
+                Ok((OPCODE_BINARY, SetFin::No))
+            },
+            (MessageInProgress::Binary, LastFragment::Yes) => {
+                Ok((OPCODE_CONTINUATION, SetFin::Yes))
+            },
+            (MessageInProgress::Binary, LastFragment::No) => {
+                Ok((OPCODE_CONTINUATION, SetFin::No))
+            },
+        }?;
+        self.send_frame(set_fin, opcode, data.as_ref());
+        Ok(())
+    }
+
+    fn send_frame<T>(
         &mut self,
         set_fin: SetFin,
         opcode: u8,
-        data: Vec<u8>,
-    ) {
+        data: T,
+    ) where
+        T: Into<Vec<u8>>,
+    {
         // This can fail if the connection has been dropped and worker
         // thread has exited before the user tries to send a frame.
         // In this case, right now we simply ignore the request.
@@ -580,7 +709,7 @@ impl WebSocket {
         let _ = self.work_in.unbounded_send(WorkerMessage::Send {
             set_fin,
             opcode,
-            data,
+            data: data.into(),
         });
     }
 }
@@ -645,7 +774,6 @@ impl Drop for WebSocket {
 
 #[cfg(test)]
 #[allow(clippy::string_lit_as_bytes)]
-
 mod tests {
     use super::*;
     use crate::mock_connection;
@@ -735,12 +863,14 @@ mod tests {
             Box::new(connection_rx),
             MaskDirection::Transmit,
         );
-        let pings = RefCell::new(Vec::new());
         let connection_back_tx = RefCell::new(connection_back_tx);
         let connection_back_rx = RefCell::new(connection_back_rx);
         let reader = async {
-            ws.for_each(|message| async {
+            ws.fold(false, |_, message| async {
                 if let Message::Ping(message) = message {
+                    // Check that the message is correct.
+                    assert_eq!("Hello,".as_bytes(), message);
+
                     // Expect to receive back the matching "PONG" message which
                     // the WebSocket should send when it gets the "PING".
                     let output = connection_back_tx.borrow_mut().web_socket_output_async().await;
@@ -762,28 +892,171 @@ mod tests {
                         );
                     }
 
-                    // Record the PONG we received.
-                    pings.borrow_mut().push(message);
-
                     // Now the we're done, we can close the connection.
                     println!("Closing connection now");
                     connection_back_rx.borrow_mut().close();
+                    true
                 } else {
                     panic!("we got something that isn't a ping!");
                 }
             })
-            .await;
+            .await
         };
-        let frame = &b"\x89\x06World!"[..];
+        let frame = &b"\x89\x06Hello,"[..];
         connection_back_rx.borrow_mut().web_socket_input(frame);
-        assert!(executor::block_on(timeout(
-            REASONABLE_FAST_OPERATION_TIMEOUT,
-            reader,
-        ))
-        .is_ok());
+        assert_eq!(
+            Ok(true),
+            executor::block_on(timeout(
+                REASONABLE_FAST_OPERATION_TIMEOUT,
+                reader,
+            ))
+        );
+    }
 
-        // Verify the ping was delivered back through the WebSocket's Stream
-        // interface.
-        assert_eq!(vec!["World!".as_bytes()], *pings.borrow());
+    #[test]
+    fn receive_pong() {
+        let (connection_tx, _connection_back_tx) = mock_connection::Tx::new();
+        let (connection_rx, connection_back_rx) = mock_connection::Rx::new();
+        let ws = WebSocket::new(
+            Box::new(connection_tx),
+            Box::new(connection_rx),
+            MaskDirection::Transmit,
+        );
+        let connection_back_rx = RefCell::new(connection_back_rx);
+        let reader = async {
+            ws.fold(false, |_, message| async {
+                if let Message::Pong(message) = message {
+                    // Check that the message is correct.
+                    assert_eq!("World!".as_bytes(), message);
+
+                    // Now the we're done, we can close the connection.
+                    println!("Closing connection now");
+                    connection_back_rx.borrow_mut().close();
+                    true
+                } else {
+                    panic!("we got something that isn't a pong!");
+                }
+            })
+            .await
+        };
+        let frame = &b"\x8A\x06World!"[..];
+        connection_back_rx.borrow_mut().web_socket_input(frame);
+        assert_eq!(
+            Ok(true),
+            executor::block_on(timeout(
+                REASONABLE_FAST_OPERATION_TIMEOUT,
+                reader,
+            ))
+        );
+    }
+
+    #[test]
+    fn send_text() {
+        let (connection_tx, mut connection_back_tx) =
+            mock_connection::Tx::new();
+        let (connection_rx, _connection_back_rx) = mock_connection::Rx::new();
+        let mut ws = WebSocket::new(
+            Box::new(connection_tx),
+            Box::new(connection_rx),
+            MaskDirection::Receive,
+        );
+        assert!(ws.text("Hello, World!", LastFragment::Yes).is_ok());
+        assert_eq!(
+            Some(&b"\x81\x0DHello, World!"[..]),
+            connection_back_tx.web_socket_output().as_deref()
+        );
+    }
+
+    #[test]
+    fn receive_text() {
+        let (connection_tx, _connection_back_tx) = mock_connection::Tx::new();
+        let (connection_rx, connection_back_rx) = mock_connection::Rx::new();
+        let ws = WebSocket::new(
+            Box::new(connection_tx),
+            Box::new(connection_rx),
+            MaskDirection::Transmit,
+        );
+        let connection_back_rx = RefCell::new(connection_back_rx);
+        let reader = async {
+            ws.fold(false, |_, message| async {
+                if let Message::Text(message) = message {
+                    // Check that the message is correct.
+                    assert_eq!("foobar", message);
+
+                    // Now the we're done, we can close the connection.
+                    println!("Closing connection now");
+                    connection_back_rx.borrow_mut().close();
+                    true
+                } else {
+                    panic!("we got something that isn't a text!");
+                }
+            })
+            .await
+        };
+        let frame = &b"\x81\x06foobar"[..];
+        connection_back_rx.borrow_mut().web_socket_input(frame);
+        assert_eq!(
+            Ok(true),
+            executor::block_on(timeout(
+                REASONABLE_FAST_OPERATION_TIMEOUT,
+                reader,
+            ))
+        );
+    }
+
+    #[test]
+    fn send_binary() {
+        let (connection_tx, mut connection_back_tx) =
+            mock_connection::Tx::new();
+        let (connection_rx, _connection_back_rx) = mock_connection::Rx::new();
+        let mut ws = WebSocket::new(
+            Box::new(connection_tx),
+            Box::new(connection_rx),
+            MaskDirection::Receive,
+        );
+        assert!(ws
+            .binary("Hello, World!".as_bytes(), LastFragment::Yes)
+            .is_ok());
+        assert_eq!(
+            Some(&b"\x82\x0DHello, World!"[..]),
+            connection_back_tx.web_socket_output().as_deref()
+        );
+    }
+
+    #[test]
+    fn receive_binary() {
+        let (connection_tx, _connection_back_tx) = mock_connection::Tx::new();
+        let (connection_rx, connection_back_rx) = mock_connection::Rx::new();
+        let ws = WebSocket::new(
+            Box::new(connection_tx),
+            Box::new(connection_rx),
+            MaskDirection::Transmit,
+        );
+        let connection_back_rx = RefCell::new(connection_back_rx);
+        let reader = async {
+            ws.fold(false, |_, message| async {
+                if let Message::Binary(message) = message {
+                    // Check that the message is correct.
+                    assert_eq!("foobar".as_bytes(), message);
+
+                    // Now the we're done, we can close the connection.
+                    println!("Closing connection now");
+                    connection_back_rx.borrow_mut().close();
+                    true
+                } else {
+                    panic!("we got something that isn't a binary!");
+                }
+            })
+            .await
+        };
+        let frame = &b"\x82\x06foobar"[..];
+        connection_back_rx.borrow_mut().web_socket_input(frame);
+        assert_eq!(
+            Ok(true),
+            executor::block_on(timeout(
+                REASONABLE_FAST_OPERATION_TIMEOUT,
+                reader,
+            ))
+        );
     }
 }

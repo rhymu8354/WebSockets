@@ -101,4 +101,13 @@ pub enum Error {
     /// Such messages cannot be fragmented into multiple frames.
     #[error("the payload provided is too large to fit into a frame")]
     FramePayloadTooLarge,
+
+    /// The message cannot be sent because the last message to be sent
+    /// was fragmented and the last fragment was not sent.
+    #[error("cannot send message as last message was not completed")]
+    LastMessageIncomplete,
+
+    /// A text message was received that is not valid UTF-8.
+    #[error("text message received is not valid UTF-8")]
+    Utf8(#[source] std::str::Utf8Error),
 }
