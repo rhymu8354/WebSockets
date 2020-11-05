@@ -22,5 +22,8 @@ use futures::{
 use web_socket::MaskDirection;
 pub use web_socket::WebSocket;
 
-pub trait Connection: AsyncRead + AsyncWrite + Send + Unpin + 'static {}
-impl<T: AsyncRead + AsyncWrite + Send + Unpin + 'static> Connection for T {}
+pub trait ConnectionTx: AsyncWrite + Send + Unpin + 'static {}
+impl<T: AsyncWrite + Send + Unpin + 'static> ConnectionTx for T {}
+
+pub trait ConnectionRx: AsyncRead + Send + Unpin + 'static {}
+impl<T: AsyncRead + Send + Unpin + 'static> ConnectionRx for T {}

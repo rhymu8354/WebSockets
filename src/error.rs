@@ -86,4 +86,19 @@ pub enum Error {
     /// The underlying network connection was broken.
     #[error("the underlying network connection was broken")]
     ConnectionBroken(#[source] std::io::Error),
+
+    /// The underlying network connection was gracefully closed.
+    #[error("the underlying network connection was gracefully closed")]
+    ConnectionClosed,
+
+    /// This indicates that the last frame reconstructed from the receiver was
+    /// bad.  A human-readable explanation of why it was bad is included.
+    #[error("the last frame reconstructed from the receiver was bad")]
+    BadFrame(&'static str),
+
+    /// A function which generates a control frame (`ping` for example) was
+    /// called with a payload that is too large to fit in the frame.
+    /// Such messages cannot be fragmented into multiple frames.
+    #[error("the payload provided is too large to fit into a frame")]
+    FramePayloadTooLarge,
 }

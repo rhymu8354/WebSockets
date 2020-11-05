@@ -8,53 +8,163 @@ use futures::{
     AsyncRead,
     AsyncWrite,
 };
+use std::{
+    io::Write,
+    sync::{
+        Arc,
+        Mutex,
+    },
+    task::Waker,
+};
 
-pub struct BackEnd {
+pub struct BackEndTx {
     receiver: Option<mpsc::UnboundedReceiver<Vec<u8>>>,
 }
 
-impl BackEnd {
+struct SharedRx {
+    fused: bool,
+    input: Vec<Vec<u8>>,
+    input_waker: Option<Waker>,
+}
+
+pub struct BackEndRx {
+    shared: Arc<Mutex<SharedRx>>,
+}
+
+impl BackEndTx {
+    pub async fn web_socket_output_async(&mut self) -> Option<Vec<u8>> {
+        let mut receiver = self.receiver.take().unwrap();
+        let result =
+            timeout(std::time::Duration::from_millis(200), receiver.next())
+                .await;
+        self.receiver.replace(receiver);
+        result.unwrap_or(None)
+    }
+
     pub fn web_socket_output(&mut self) -> Option<Vec<u8>> {
-        executor::block_on(async {
-            let mut receiver = self.receiver.take().unwrap();
-            let result =
-                timeout(std::time::Duration::from_millis(200), receiver.next())
-                    .await;
-            self.receiver.replace(receiver);
-            result.unwrap_or(None)
-        })
+        executor::block_on(self.web_socket_output_async())
     }
 }
 
-pub struct MockConnection {
+impl BackEndRx {
+    pub fn close(&mut self) {
+        let mut shared = self.shared.lock().unwrap();
+        shared.fused = true;
+        if let Some(waker) = shared.input_waker.take() {
+            waker.wake();
+        }
+    }
+
+    pub fn web_socket_input<T>(
+        &mut self,
+        data: T,
+    ) where
+        T: Into<Vec<u8>>,
+    {
+        let data = data.into();
+        let mut shared = self.shared.lock().unwrap();
+        println!(
+            "web_socket_input: feeding the WebSocket {} bytes",
+            data.len()
+        );
+        shared.input.push(data);
+        if let Some(waker) = shared.input_waker.take() {
+            println!("web_socket_input: hey, we have a customer waiting!");
+            waker.wake();
+        } else {
+            println!("web_socket_input: it's very lonely here with nobody waiting for data");
+        }
+    }
+}
+
+pub struct Tx {
     sender: mpsc::UnboundedSender<Vec<u8>>,
 }
 
-impl MockConnection {
-    pub fn new() -> (Self, BackEnd) {
+pub struct Rx {
+    shared: Arc<Mutex<SharedRx>>,
+}
+
+impl Tx {
+    pub fn new() -> (Self, BackEndTx) {
         let (sender, receiver) = mpsc::unbounded();
         (
             Self {
                 sender,
             },
-            BackEnd {
+            BackEndTx {
                 receiver: Some(receiver),
             },
         )
     }
 }
 
-impl AsyncRead for MockConnection {
-    fn poll_read(
-        self: std::pin::Pin<&mut Self>,
-        _cx: &mut std::task::Context<'_>,
-        _buf: &mut [u8],
-    ) -> std::task::Poll<std::io::Result<usize>> {
-        std::task::Poll::Pending
+impl Rx {
+    pub fn new() -> (Self, BackEndRx) {
+        let shared = Arc::new(Mutex::new(SharedRx {
+            fused: false,
+            input: Vec::new(),
+            input_waker: None,
+        }));
+        (
+            Self {
+                shared: shared.clone(),
+            },
+            BackEndRx {
+                shared,
+            },
+        )
     }
 }
 
-impl AsyncWrite for MockConnection {
+impl AsyncRead for Rx {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        mut buf: &mut [u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        let mut shared = self.shared.lock().unwrap();
+        println!("poll_read: we want {} bytes plz kthxbye", buf.len());
+        if shared.input.is_empty() {
+            println!("poll_read: oh no, it's empty!");
+            if shared.fused {
+                println!("poll_read: drat, the fuse has been lit!");
+                std::task::Poll::Ready(Ok(0))
+            } else {
+                println!("poll_read: come back tomorrow");
+                shared.input_waker.replace(cx.waker().clone());
+                std::task::Poll::Pending
+            }
+        } else {
+            let mut total_bytes_read = 0;
+            while !buf.is_empty() {
+                println!("poll_read: they can take {} more", buf.len());
+                if let Some(input_front) = shared.input.first_mut() {
+                    let bytes_read = buf.write(&input_front).unwrap();
+                    println!("poll_read: we gave them {} more", bytes_read);
+                    total_bytes_read += bytes_read;
+                    if bytes_read == input_front.len() {
+                        println!("poll_read: so much for that buffer!");
+                        shared.input.remove(0);
+                    } else {
+                        input_front.drain(0..bytes_read);
+                        println!(
+                            "poll_read: there are {} bytes left in the buffer",
+                            input_front.len()
+                        );
+                    }
+                } else {
+                    println!("poll_read: we ran out of buffers, but they still wanted more!");
+                    break;
+                }
+            }
+            println!("poll_read: we got {} bytes for you", total_bytes_read);
+            std::task::Poll::Ready(Ok(total_bytes_read))
+        }
+    }
+}
+
+impl AsyncWrite for Tx {
     fn poll_write(
         self: std::pin::Pin<&mut Self>,
         _cx: &mut std::task::Context<'_>,
