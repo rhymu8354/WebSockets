@@ -652,7 +652,7 @@ mod tests {
     use async_std::future::timeout;
 
     const REASONABLE_FAST_OPERATION_TIMEOUT: std::time::Duration =
-        std::time::Duration::from_millis(20);
+        std::time::Duration::from_millis(200);
 
     #[test]
     fn server_send_ping_normal_with_data() {
