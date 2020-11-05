@@ -63,16 +63,9 @@ impl BackEndRx {
     {
         let data = data.into();
         let mut shared = self.shared.lock().unwrap();
-        println!(
-            "web_socket_input: feeding the WebSocket {} bytes",
-            data.len()
-        );
         shared.input.push(data);
         if let Some(waker) = shared.input_waker.take() {
-            println!("web_socket_input: hey, we have a customer waiting!");
             waker.wake();
-        } else {
-            println!("web_socket_input: it's very lonely here with nobody waiting for data");
         }
     }
 }
@@ -124,41 +117,28 @@ impl AsyncRead for Rx {
         mut buf: &mut [u8],
     ) -> std::task::Poll<std::io::Result<usize>> {
         let mut shared = self.shared.lock().unwrap();
-        println!("poll_read: we want {} bytes plz kthxbye", buf.len());
         if shared.input.is_empty() {
-            println!("poll_read: oh no, it's empty!");
             if shared.fused {
-                println!("poll_read: drat, the fuse has been lit!");
                 std::task::Poll::Ready(Ok(0))
             } else {
-                println!("poll_read: come back tomorrow");
                 shared.input_waker.replace(cx.waker().clone());
                 std::task::Poll::Pending
             }
         } else {
             let mut total_bytes_read = 0;
             while !buf.is_empty() {
-                println!("poll_read: they can take {} more", buf.len());
                 if let Some(input_front) = shared.input.first_mut() {
                     let bytes_read = buf.write(&input_front).unwrap();
-                    println!("poll_read: we gave them {} more", bytes_read);
                     total_bytes_read += bytes_read;
                     if bytes_read == input_front.len() {
-                        println!("poll_read: so much for that buffer!");
                         shared.input.remove(0);
                     } else {
                         input_front.drain(0..bytes_read);
-                        println!(
-                            "poll_read: there are {} bytes left in the buffer",
-                            input_front.len()
-                        );
                     }
                 } else {
-                    println!("poll_read: we ran out of buffers, but they still wanted more!");
                     break;
                 }
             }
-            println!("poll_read: we got {} bytes for you", total_bytes_read);
             std::task::Poll::Ready(Ok(total_bytes_read))
         }
     }

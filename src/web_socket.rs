@@ -184,28 +184,22 @@ async fn handle_message(
     mask_direction: MaskDirection,
 ) -> Result<(), ()> {
     match message {
-        WorkerMessage::Exit => {
-            println!("worker: got Exit message");
-            Err(())
-        },
+        WorkerMessage::Exit => Err(()),
 
         WorkerMessage::Send {
             set_fin,
             opcode,
             data,
-        } => {
-            println!("worker: got Send message");
-            send_frame(
-                &mut *connection_tx.borrow_mut(),
-                set_fin,
-                opcode,
-                data,
-                mask_direction,
-                &mut rng.borrow_mut(),
-            )
-            .await
-            .map_err(|_| ())
-        },
+        } => send_frame(
+            &mut *connection_tx.borrow_mut(),
+            set_fin,
+            opcode,
+            data,
+            mask_direction,
+            &mut rng.borrow_mut(),
+        )
+        .await
+        .map_err(|_| ()),
     }
 }
 
@@ -227,11 +221,6 @@ async fn receive_bytes(
             0 => Err(Error::ConnectionClosed),
             received => Ok(received),
         })?;
-    println!(
-        "receive_bytes: Received {} bytes (we now have {})",
-        received,
-        left_over + received
-    );
     frame_reassembly_buffer.truncate(left_over + received);
     Ok(())
 }
@@ -247,7 +236,6 @@ fn receive_frame(
     received_messages: &Arc<Mutex<ReceivedMessages>>,
     work_in_sender: &mut mpsc::UnboundedSender<WorkerMessage>,
 ) -> Result<(), Error> {
-    println!("receive_frame: {} bytes", frame_reassembly_buffer.len());
     // TODO: I don't remember if this is actually necessary.  Receiving
     // data after we have received a `Close` frame *is* illegal, but in
     // this implementation, we may have completed the worker thread's tasks
@@ -310,10 +298,6 @@ fn receive_frame(
     let opcode = frame_reassembly_buffer[0] & 0x0F;
     match opcode {
         OPCODE_TEXT => {
-            println!(
-                "receive_frame: TEXT(\"{}\")",
-                String::from_utf8_lossy(payload)
-            );
             let payload = std::str::from_utf8(payload).map_err(Error::Utf8)?;
             let mut received_messages = received_messages
                 .lock()
@@ -328,10 +312,6 @@ fn receive_frame(
         },
 
         OPCODE_BINARY => {
-            println!(
-                "receive_frame: BINARY(\"{}\")",
-                String::from_utf8_lossy(payload)
-            );
             let payload = payload.to_vec();
             let mut received_messages = received_messages
                 .lock()
@@ -344,10 +324,6 @@ fn receive_frame(
         },
 
         OPCODE_PING => {
-            println!(
-                "receive_frame: PING(\"{}\")",
-                String::from_utf8_lossy(payload)
-            );
             // TODO: Check to see if we should verify FIN is set.
             // It doesn't make any sense for it to be clear, since a ping
             // frame can never be fragmented.
@@ -370,10 +346,6 @@ fn receive_frame(
         },
 
         OPCODE_PONG => {
-            println!(
-                "receive_frame: PONG(\"{}\")",
-                String::from_utf8_lossy(payload)
-            );
             // TODO: Check to see if we should verify FIN is set.
             // It doesn't make any sense for it to be clear, since a ping
             // frame can never be fragmented.
@@ -402,28 +374,20 @@ async fn receive_frames(
     mask_direction: MaskDirection,
     mut work_in_sender: mpsc::UnboundedSender<WorkerMessage>,
 ) {
-    println!("receive_frames: begin");
     let mut frame_reassembly_buffer = Vec::new();
     let mut message_reassembly_buffer = Vec::new();
     loop {
         // Wait for more data to arrive.
-        println!("receive_frames: Reading more data");
         if receive_bytes(&mut connection_rx, &mut frame_reassembly_buffer)
             .await
-            .map_err(|error| {
-                println!("receive_frames: error: {:?}", error);
-                error
-            })
             .is_err()
         {
-            println!("receive_frames: Connection broken");
             break;
         }
 
         // Proceed only if we have enough data to recover the first length
         // octet.
         if frame_reassembly_buffer.len() < 2 {
-            println!("receive_frames: not enough bytes to decode frame length");
             continue;
         }
 
@@ -472,11 +436,6 @@ async fn receive_frames(
                 header_length += 4;
             }
             let frame_length = header_length + payload_length;
-            println!(
-                "receive_frames: next frame is {} header bytes, {} payload bytes",
-                header_length,
-                payload_length
-            );
             // TODO: We will need a way to configure the maximum frame size.
             if let Some(max_frame_size) = max_frame_size {
                 if frame_length > max_frame_size {
@@ -498,7 +457,6 @@ async fn receive_frames(
             )
             .is_err()
             {
-                println!("receive_frames: oops!  bad frame?");
                 break;
             }
             // TODO: This is expensive, especially if we get a large number
@@ -515,7 +473,6 @@ async fn receive_frames(
             }
         }
     }
-    println!("receive_frames: end");
 }
 
 // The use of `futures::select!` seems to trigger this warning somehow
@@ -532,7 +489,6 @@ async fn worker(
     //    let mut close_sent = false;
 
     // Drive to completion the stream of messages to the worker thread.
-    println!("worker: processing messages");
     let connection_tx = RefCell::new(connection_tx);
     let rng = RefCell::new(StdRng::from_entropy());
     let processing_tx = work_in_receiver.map(Ok).try_for_each(|message| {
@@ -556,7 +512,6 @@ async fn worker(
     if let Some(waker) = received_messages.waker.take() {
         waker.wake();
     }
-    println!("worker: exiting");
 }
 
 struct ReceivedMessages {
@@ -893,7 +848,6 @@ mod tests {
                     }
 
                     // Now the we're done, we can close the connection.
-                    println!("Closing connection now");
                     connection_back_rx.borrow_mut().close();
                     true
                 } else {
@@ -930,7 +884,6 @@ mod tests {
                     assert_eq!("World!".as_bytes(), message);
 
                     // Now the we're done, we can close the connection.
-                    println!("Closing connection now");
                     connection_back_rx.borrow_mut().close();
                     true
                 } else {
@@ -984,7 +937,6 @@ mod tests {
                     assert_eq!("foobar", message);
 
                     // Now the we're done, we can close the connection.
-                    println!("Closing connection now");
                     connection_back_rx.borrow_mut().close();
                     true
                 } else {
@@ -1040,7 +992,6 @@ mod tests {
                     assert_eq!("foobar".as_bytes(), message);
 
                     // Now the we're done, we can close the connection.
-                    println!("Closing connection now");
                     connection_back_rx.borrow_mut().close();
                     true
                 } else {
