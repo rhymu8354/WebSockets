@@ -102,12 +102,22 @@ pub enum Error {
     #[error("the payload provided is too large to fit into a frame")]
     FramePayloadTooLarge,
 
-    /// The message cannot be sent because the last message to be sent
-    /// was fragmented and the last fragment was not sent.
-    #[error("cannot send message as last message was not completed")]
-    LastMessageIncomplete,
+    /// The message cannot be sent, or the start of a new message cannot
+    /// be accepted, because the previous message was not finished.
+    #[error("last message was not finished")]
+    LastMessageUnfinished,
 
     /// A text message was received that is not valid UTF-8.
     #[error("text message received is not valid UTF-8")]
     Utf8(#[source] std::str::Utf8Error),
+
+    /// The WebSocket received a continuation frame when no message
+    /// reconstruction was in progress.
+    #[error("received an unexpected continuation frame")]
+    UnexpectedContinuationFrame,
+
+    /// The operation could not be completed because the WebSocket
+    /// is already closed.
+    #[error("WebSocket is already closed")]
+    Closed,
 }
