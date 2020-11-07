@@ -7,7 +7,6 @@ use async_mutex::Mutex;
 use futures::{
     channel::mpsc,
     executor,
-    future::FutureExt,
     stream::{
         StreamExt,
         TryStreamExt,
@@ -15,6 +14,7 @@ use futures::{
     AsyncReadExt,
     AsyncWriteExt,
     Future,
+    FutureExt,
     Sink,
     SinkExt,
     Stream,
@@ -25,7 +25,6 @@ use rand::{
     SeedableRng,
 };
 use std::{
-    cell::RefCell,
     collections::VecDeque,
     sync::Arc,
     task::{
@@ -123,6 +122,15 @@ impl ReceivedMessages {
         message: StreamMessage,
     ) {
         self.queue.push_back(message);
+        self.wake();
+    }
+
+    fn fuse(&mut self) {
+        self.fused = true;
+        self.wake();
+    }
+
+    fn wake(&mut self) {
         if let Some(waker) = self.waker.take() {
             waker.wake();
         }
@@ -148,28 +156,46 @@ enum WorkerMessage {
     },
 }
 
-struct MessageHandlerContext {
+fn close_code_and_reason_from_error(error: Error) -> (usize, String) {
+    match error {
+        Error::BadFrame(reason) => (1002, String::from(reason)),
+        Error::FramePayloadTooLarge => (1009, String::from("frame too large")),
+        Error::Utf8 {
+            context,
+            ..
+        } => (1007, format!("invalid UTF-8 encoding in {}", context)),
+        Error::ConnectionBroken(source) => {
+            (1006, format!("error in underlying connection ({})", source))
+        },
+        Error::ConnectionClosed => {
+            (1006, String::from("underlying connection closed gracefully"))
+        },
+        _ => (1005, String::new()),
+    }
+}
+
+struct MessageHandler {
+    close_sent: bool,
     connection_tx: Box<dyn ConnectionTx>,
     mask_direction: MaskDirection,
     rng: StdRng,
 }
-
-struct MessageHandler(RefCell<MessageHandlerContext>);
 
 impl MessageHandler {
     fn new(
         connection_tx: Box<dyn ConnectionTx>,
         mask_direction: MaskDirection,
     ) -> Self {
-        Self(RefCell::new(MessageHandlerContext {
+        Self {
+            close_sent: false,
             connection_tx,
             mask_direction,
             rng: StdRng::from_entropy(),
-        }))
+        }
     }
 
     async fn handle_message(
-        &self,
+        &mut self,
         message: WorkerMessage,
     ) -> Result<(), ()> {
         match message {
@@ -184,12 +210,18 @@ impl MessageHandler {
     }
 
     async fn send_frame(
-        &self,
+        &mut self,
         set_fin: SetFin,
         opcode: u8,
         mut payload: Vec<u8>,
     ) -> Result<(), Error> {
-        let mut cx = self.0.borrow_mut();
+        // Do not send anything after sending "CLOSE".
+        if self.close_sent {
+            return Err(Error::Closed);
+        }
+        if opcode == OPCODE_CLOSE {
+            self.close_sent = true;
+        }
 
         // Pessimistically (meaning we might allocate more than we need)
         // allocate enough memory for the frame in one shot.
@@ -205,7 +237,7 @@ impl MessageHandler {
         );
 
         // Determine what to set for the MASK flag.
-        let mask = match cx.mask_direction {
+        let mask = match self.mask_direction {
             MaskDirection::Receive => 0,
             MaskDirection::Transmit => MASK,
         };
@@ -247,7 +279,7 @@ impl MessageHandler {
         } else {
             // Generate a random mask (4 bytes).
             let mut masking_key = [0; 4];
-            cx.rng.fill(&mut masking_key);
+            self.rng.fill(&mut masking_key);
 
             // Include the mask in the frame.
             frame.extend(masking_key.iter());
@@ -265,10 +297,29 @@ impl MessageHandler {
         // may yield until the connection is able to receive all the bytes.
         //
         // If any error occurs, consider the connection to be broken.
-        cx.connection_tx
+        self.connection_tx
             .write_all(&frame)
             .await
             .map_err(Error::ConnectionBroken)
+    }
+
+    async fn send_close(
+        &mut self,
+        code: usize,
+        reason: String,
+    ) {
+        let payload = if code == 1005 {
+            vec![]
+        } else {
+            // TODO: Find out if there's a nicer way to avoid the
+            // truncation warning about casting to
+            // `u8`.
+            #[allow(clippy::cast_possible_truncation)]
+            let mut payload = vec![(code >> 8) as u8, code as u8];
+            payload.extend(reason.as_bytes());
+            payload
+        };
+        let _ = self.send_frame(SetFin::Yes, OPCODE_CLOSE, payload).await;
     }
 }
 
@@ -299,7 +350,7 @@ async fn receive_frame_binary(
     message_in_progress: &mut MessageInProgress,
     mut payload: Vec<u8>,
     fin: bool,
-    received_messages: &Arc<Mutex<ReceivedMessages>>,
+    received_messages: &Mutex<ReceivedMessages>,
 ) -> Result<(), Error> {
     message_reassembly_buffer.append(&mut payload);
     *message_in_progress = if fin {
@@ -319,25 +370,29 @@ async fn receive_frame_text(
     message_in_progress: &mut MessageInProgress,
     mut payload: Vec<u8>,
     fin: bool,
-    received_messages: &Arc<Mutex<ReceivedMessages>>,
+    received_messages: &Mutex<ReceivedMessages>,
 ) -> Result<(), Error> {
     message_reassembly_buffer.append(&mut payload);
     *message_in_progress = if fin {
-        let message = std::str::from_utf8(message_reassembly_buffer)
-            .map_err(Error::Utf8)?;
+        let message = std::str::from_utf8(message_reassembly_buffer).map_err(
+            |source| Error::Utf8 {
+                source,
+                context: "text message",
+            },
+        )?;
         let mut received_messages = received_messages.lock().await;
-        received_messages
-            .queue
-            .push_back(StreamMessage::Text(String::from(message)));
+        received_messages.push(StreamMessage::Text(String::from(message)));
         message_reassembly_buffer.clear();
-        if let Some(waker) = received_messages.waker.take() {
-            waker.wake();
-        }
         MessageInProgress::None
     } else {
         MessageInProgress::Text
     };
     Ok(())
+}
+
+enum ReceivedCloseFrame {
+    Yes,
+    No,
 }
 
 // TODO: Refactor this function so we don't need to suppress these warnings.
@@ -350,9 +405,9 @@ async fn receive_frame(
     header_length: usize,
     payload_length: usize,
     mask_direction: MaskDirection,
-    received_messages: &Arc<Mutex<ReceivedMessages>>,
-    work_in_sender: &mut mpsc::UnboundedSender<WorkerMessage>,
-) -> Result<(), Error> {
+    received_messages: &Mutex<ReceivedMessages>,
+    message_handler: &Mutex<MessageHandler>,
+) -> Result<ReceivedCloseFrame, Error> {
     // TODO: I don't remember if this is actually necessary.  Receiving
     // data after we have received a `Close` frame *is* illegal, but in
     // this implementation, we may have completed the worker thread's tasks
@@ -410,28 +465,33 @@ async fn receive_frame(
     }
 
     match opcode {
-        OPCODE_CONTINUATION => match message_in_progress {
-            MessageInProgress::None => Err(Error::UnexpectedContinuationFrame),
-            MessageInProgress::Text => {
-                receive_frame_text(
-                    message_reassembly_buffer,
-                    message_in_progress,
-                    payload,
-                    fin,
-                    received_messages,
-                )
-                .await
-            },
-            MessageInProgress::Binary => {
-                receive_frame_binary(
-                    message_reassembly_buffer,
-                    message_in_progress,
-                    payload,
-                    fin,
-                    received_messages,
-                )
-                .await
-            },
+        OPCODE_CONTINUATION => {
+            match message_in_progress {
+                MessageInProgress::None => {
+                    return Err(Error::UnexpectedContinuationFrame)
+                },
+                MessageInProgress::Text => {
+                    receive_frame_text(
+                        message_reassembly_buffer,
+                        message_in_progress,
+                        payload,
+                        fin,
+                        received_messages,
+                    )
+                    .await?;
+                },
+                MessageInProgress::Binary => {
+                    receive_frame_binary(
+                        message_reassembly_buffer,
+                        message_in_progress,
+                        payload,
+                        fin,
+                        received_messages,
+                    )
+                    .await?;
+                },
+            }
+            Ok(ReceivedCloseFrame::No)
         },
 
         OPCODE_TEXT => {
@@ -443,10 +503,11 @@ async fn receive_frame(
                     fin,
                     received_messages,
                 )
-                .await
+                .await?;
             } else {
-                Err(Error::LastMessageUnfinished)
+                return Err(Error::LastMessageUnfinished);
             }
+            Ok(ReceivedCloseFrame::No)
         },
 
         OPCODE_BINARY => {
@@ -458,10 +519,11 @@ async fn receive_frame(
                     fin,
                     received_messages,
                 )
-                .await
+                .await?
             } else {
-                Err(Error::LastMessageUnfinished)
+                return Err(Error::LastMessageUnfinished);
             }
+            Ok(ReceivedCloseFrame::No)
         },
 
         OPCODE_PING => {
@@ -474,45 +536,44 @@ async fn receive_frame(
             // of messages are sitting in the channel waiting to be sent.
             // It would be better if we could "cut to the front of the line"
             // to send the PONG.
-            work_in_sender
-                .unbounded_send(WorkerMessage::Send {
-                    set_fin: SetFin::Yes,
-                    opcode: OPCODE_PONG,
-                    data: payload.clone(),
-                })
-                .expect("worker thread dropped its receiver");
-            let mut received_messages = received_messages.lock().await;
-            received_messages.push(StreamMessage::Ping(payload));
-            Ok(())
+            message_handler
+                .lock()
+                .await
+                .send_frame(SetFin::Yes, OPCODE_PONG, payload.clone())
+                .await?;
+            received_messages.lock().await.push(StreamMessage::Ping(payload));
+            Ok(ReceivedCloseFrame::No)
         },
 
         OPCODE_PONG => {
             // TODO: Check to see if we should verify FIN is set.
             // It doesn't make any sense for it to be clear, since a ping
             // frame can never be fragmented.
-            let mut received_messages = received_messages.lock().await;
-            received_messages.push(StreamMessage::Pong(payload));
-            Ok(())
+            received_messages.lock().await.push(StreamMessage::Pong(payload));
+            Ok(ReceivedCloseFrame::No)
         },
 
         OPCODE_CLOSE => {
             // TODO: Check to see if we should verify FIN is set.
             // It doesn't make any sense for it to be clear, since a ping
             // frame can never be fragmented.
-            let mut received_messages = received_messages.lock().await;
             let mut code = 1005;
             let mut reason = String::new();
             if payload.len() >= 2 {
                 code = ((payload[0] as usize) << 8) + (payload[1] as usize);
-                reason = String::from(
-                    std::str::from_utf8(&payload[2..]).map_err(Error::Utf8)?,
-                );
+                reason =
+                    String::from(std::str::from_utf8(&payload[2..]).map_err(
+                        |source| Error::Utf8 {
+                            source,
+                            context: "close reason",
+                        },
+                    )?);
             }
-            received_messages.push(StreamMessage::Close {
+            received_messages.lock().await.push(StreamMessage::Close {
                 code,
                 reason,
             });
-            Ok(())
+            Ok(ReceivedCloseFrame::Yes)
         },
 
         _ => {
@@ -522,25 +583,24 @@ async fn receive_frame(
     }
 }
 
-async fn receive_frames(
+// TODO: Needs refactoring
+#[allow(clippy::too_many_lines)]
+async fn try_receive_frames(
     mut connection_rx: Box<dyn ConnectionRx>,
-    received_messages: Arc<Mutex<ReceivedMessages>>,
+    received_messages: &Mutex<ReceivedMessages>,
     max_frame_size: Option<usize>,
     mask_direction: MaskDirection,
-    mut work_in_sender: mpsc::UnboundedSender<WorkerMessage>,
-) {
+    message_handler: &Mutex<MessageHandler>,
+) -> Result<(), Error> {
     let mut frame_reassembly_buffer = Vec::new();
     let mut message_reassembly_buffer = Vec::new();
     let mut message_in_progress = MessageInProgress::None;
     let mut need_more_input = true;
     loop {
         // Wait for more data to arrive, if we need more input.
-        if need_more_input
-            && receive_bytes(&mut connection_rx, &mut frame_reassembly_buffer)
-                .await
-                .is_err()
-        {
-            break;
+        if need_more_input {
+            receive_bytes(&mut connection_rx, &mut frame_reassembly_buffer)
+                .await?;
         }
 
         // Until we recover a whole frame, assume we need to read more data.
@@ -600,27 +660,25 @@ async fn receive_frames(
             // TODO: We will need a way to configure the maximum frame size.
             if let Some(max_frame_size) = max_frame_size {
                 if frame_length > max_frame_size {
-                    // close(1009, "frame too large", true);
-                    break;
+                    return Err(Error::FramePayloadTooLarge);
                 }
             }
             if frame_reassembly_buffer.len() < frame_length {
                 continue;
             }
-            if let Err(error) = receive_frame(
+            if let ReceivedCloseFrame::Yes = receive_frame(
                 &mut message_reassembly_buffer,
                 &mut message_in_progress,
                 &frame_reassembly_buffer[0..frame_length],
                 header_length,
                 payload_length,
                 mask_direction,
-                &received_messages,
-                &mut work_in_sender,
+                received_messages,
+                message_handler,
             )
-            .await
+            .await?
             {
-                // TODO: Send a "CLOSE" frame before breaking out.
-                break;
+                return Ok(());
             }
             // TODO: This is expensive, especially if we get a large number
             // of bytes following the frame we just received.  Look for
@@ -634,19 +692,55 @@ async fn receive_frames(
             // TODO: We will need a way to configure the maximum frame size.
             if let Some(max_frame_size) = max_frame_size {
                 if frame_reassembly_buffer.len() >= max_frame_size {
-                    // close(1009, "frame too large", true);
-                    break;
+                    return Err(Error::FramePayloadTooLarge);
                 }
             }
         }
     }
 }
 
+async fn receive_frames(
+    connection_rx: Box<dyn ConnectionRx>,
+    received_messages: Arc<Mutex<ReceivedMessages>>,
+    max_frame_size: Option<usize>,
+    mask_direction: MaskDirection,
+    message_handler: &Mutex<MessageHandler>,
+) {
+    if let Err(error) = try_receive_frames(
+        connection_rx,
+        &*received_messages,
+        max_frame_size,
+        mask_direction,
+        message_handler,
+    )
+    .await
+    {
+        let (code, reason) = close_code_and_reason_from_error(error);
+        received_messages.lock().await.push(StreamMessage::Close {
+            code,
+            reason: reason.clone(),
+        });
+        message_handler.lock().await.send_close(code, reason).await;
+    }
+    received_messages.lock().await.fuse();
+}
+
+async fn handle_messages(
+    work_in_receiver: mpsc::UnboundedReceiver<WorkerMessage>,
+    message_handler: &Mutex<MessageHandler>,
+) {
+    let _ = work_in_receiver
+        .map(Ok)
+        .try_for_each(|message| async {
+            message_handler.lock().await.handle_message(message).await
+        })
+        .await;
+}
+
 // The use of `futures::select!` seems to trigger this warning somehow
 // that isn't yet understood.
 #[allow(clippy::mut_mut)]
 async fn worker(
-    work_in_sender: mpsc::UnboundedSender<WorkerMessage>,
     work_in_receiver: mpsc::UnboundedReceiver<WorkerMessage>,
     received_messages: Arc<Mutex<ReceivedMessages>>,
     connection_tx: Box<dyn ConnectionTx>,
@@ -654,26 +748,21 @@ async fn worker(
     mask_direction: MaskDirection,
 ) {
     // Drive to completion the stream of messages to the worker thread.
-    let message_handler = MessageHandler::new(connection_tx, mask_direction);
-    let processing_tx = work_in_receiver
-        .map(Ok)
-        .try_for_each(|message| message_handler.handle_message(message));
-    let processing_rx = receive_frames(
+    let message_handler =
+        Mutex::new(MessageHandler::new(connection_tx, mask_direction));
+    let handle_messages_future =
+        handle_messages(work_in_receiver, &message_handler);
+    let receive_frames_future = receive_frames(
         connection_rx,
-        received_messages.clone(),
-        None,
+        received_messages,
+        None, // TODO: allow this to be configured.
         mask_direction,
-        work_in_sender,
+        &message_handler,
     );
     futures::select!(
-        _ = processing_tx.fuse() => (),
-        _ = processing_rx.fuse() => (),
+        _ = handle_messages_future.fuse() => {},
+        _ = receive_frames_future.fuse() => {},
     );
-    let mut received_messages = received_messages.lock().await;
-    received_messages.fused = true;
-    if let Some(waker) = received_messages.waker.take() {
-        waker.wake();
-    }
 }
 
 #[must_use]
@@ -729,10 +818,9 @@ impl WebSocket {
             close_sent: false,
             message_in_progress: MessageInProgress::None,
             received_messages: received_messages.clone(),
-            work_in: sender.clone(),
+            work_in: sender,
             worker: Some(thread::spawn(move || {
                 executor::block_on(worker(
-                    sender,
                     receiver,
                     received_messages,
                     connection_tx,
@@ -930,6 +1018,7 @@ impl Sink<SinkMessage> for WebSocket {
                         // `u8`.
                         #[allow(clippy::cast_possible_truncation)]
                         let mut data = vec![(code >> 8) as u8, code as u8];
+                        // TODO: Check to make sure reason isn't too long.
                         data.extend(reason.as_bytes());
                         data
                     },
@@ -940,7 +1029,7 @@ impl Sink<SinkMessage> for WebSocket {
                 WorkerMessage::Send {
                     set_fin: SetFin::Yes,
                     opcode: OPCODE_CLOSE,
-                    data: Vec::new(),
+                    data: vec![],
                 }
             },
         };
@@ -988,6 +1077,7 @@ mod tests {
     use super::*;
     use crate::mock_connection;
     use async_std::future::timeout;
+    use std::cell::RefCell;
 
     const REASONABLE_FAST_OPERATION_TIMEOUT: std::time::Duration =
         std::time::Duration::from_millis(200);
@@ -1065,54 +1155,52 @@ mod tests {
     #[test]
     fn receive_ping() {
         let (connection_tx, connection_back_tx) = mock_connection::Tx::new();
-        let (connection_rx, connection_back_rx) = mock_connection::Rx::new();
+        let (connection_rx, mut connection_back_rx) =
+            mock_connection::Rx::new();
         let ws = WebSocket::new(
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Transmit,
         );
-        let connection_back_tx = RefCell::new(connection_back_tx);
-        let connection_back_rx = RefCell::new(connection_back_rx);
+        let connection_back_tx = &RefCell::new(connection_back_tx);
         let reader = async {
-            ws.fold(false, |_, message| async {
-                if let StreamMessage::Ping(message) = message {
-                    // Check that the message is correct.
-                    assert_eq!("Hello,".as_bytes(), message);
+            ws.take(1)
+                .for_each(|message| async move {
+                    if let StreamMessage::Ping(message) = message {
+                        // Check that the message is correct.
+                        assert_eq!("Hello,".as_bytes(), message);
 
-                    // Expect to receive back the matching "PONG" message which
-                    // the WebSocket should send when it gets the "PING".
-                    let output = connection_back_tx.borrow_mut().web_socket_output_async().await;
-                    assert!(output.is_some());
-                    let output = output.unwrap();
+                        // Expect to receive back the matching "PONG" message
+                        // which the WebSocket should send when it gets the
+                        // "PING".
+                        let output = connection_back_tx.borrow_mut().web_socket_output_async().await;
+                        assert!(output.is_some());
+                        let output = output.unwrap();
 
-                    // Verify the size is correct.
-                    assert_eq!(12, output.len());
+                        // Verify the size is correct.
+                        assert_eq!(12, output.len());
 
-                    // Verify the header is correct.
-                    assert_eq!(b"\x8A\x86", &output[0..2]);
+                        // Verify the header is correct.
+                        assert_eq!(b"\x8A\x86", &output[0..2]);
 
-                    // Verify masked data is correct (mask is random).
-                    for i in 0..6 {
-                        assert_eq!(
-                            // data    ^      mask
-                            message[i] ^ output[2 + (i % 4)], // original input, masked
-                            output[6 + i]                     // output
-                        );
+                        // Verify masked data is correct (mask is random).
+                        for i in 0..6 {
+                            assert_eq!(
+                                // data    ^      mask
+                                message[i] ^ output[2 + (i % 4)], // original input, masked
+                                output[6 + i]                     // output
+                            );
+                        }
+                    } else {
+                        panic!("we got something that isn't a ping!");
                     }
-
-                    // Now the we're done, we can close the connection.
-                    connection_back_rx.borrow_mut().close().await;
-                    true
-                } else {
-                    panic!("we got something that isn't a ping!");
-                }
-            })
-            .await
+                })
+                .await
         };
         let frame = &b"\x89\x06Hello,"[..];
-        connection_back_rx.borrow_mut().web_socket_input(frame);
+        connection_back_rx.web_socket_input(frame);
         assert_eq!(
-            Ok(true),
+            Ok(()),
             executor::block_on(timeout(
                 REASONABLE_FAST_OPERATION_TIMEOUT,
                 reader,
@@ -1123,32 +1211,29 @@ mod tests {
     #[test]
     fn receive_pong() {
         let (connection_tx, _connection_back_tx) = mock_connection::Tx::new();
-        let (connection_rx, connection_back_rx) = mock_connection::Rx::new();
+        let (connection_rx, mut connection_back_rx) =
+            mock_connection::Rx::new();
         let ws = WebSocket::new(
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Transmit,
         );
-        let connection_back_rx = RefCell::new(connection_back_rx);
         let reader = async {
-            ws.fold(false, |_, message| async {
-                if let StreamMessage::Pong(message) = message {
-                    // Check that the message is correct.
-                    assert_eq!("World!".as_bytes(), message);
-
-                    // Now the we're done, we can close the connection.
-                    connection_back_rx.borrow_mut().close().await;
-                    true
-                } else {
-                    panic!("we got something that isn't a pong!");
-                }
-            })
-            .await
+            ws.take(1)
+                .for_each(|message| async move {
+                    if let StreamMessage::Pong(message) = message {
+                        // Check that the message is correct.
+                        assert_eq!("World!".as_bytes(), message);
+                    } else {
+                        panic!("we got something that isn't a pong!");
+                    }
+                })
+                .await
         };
         let frame = &b"\x8A\x06World!"[..];
-        connection_back_rx.borrow_mut().web_socket_input(frame);
+        connection_back_rx.web_socket_input(frame);
         assert_eq!(
-            Ok(true),
+            Ok(()),
             executor::block_on(timeout(
                 REASONABLE_FAST_OPERATION_TIMEOUT,
                 reader,
@@ -1176,32 +1261,29 @@ mod tests {
     #[test]
     fn receive_text() {
         let (connection_tx, _connection_back_tx) = mock_connection::Tx::new();
-        let (connection_rx, connection_back_rx) = mock_connection::Rx::new();
+        let (connection_rx, mut connection_back_rx) =
+            mock_connection::Rx::new();
         let ws = WebSocket::new(
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Transmit,
         );
-        let connection_back_rx = RefCell::new(connection_back_rx);
         let reader = async {
-            ws.fold(false, |_, message| async {
-                if let StreamMessage::Text(message) = message {
-                    // Check that the message is correct.
-                    assert_eq!("foobar", message);
-
-                    // Now the we're done, we can close the connection.
-                    connection_back_rx.borrow_mut().close().await;
-                    true
-                } else {
-                    panic!("we got something that isn't a text!");
-                }
-            })
-            .await
+            ws.take(1)
+                .for_each(|message| async {
+                    if let StreamMessage::Text(message) = message {
+                        // Check that the message is correct.
+                        assert_eq!("foobar", message);
+                    } else {
+                        panic!("we got something that isn't a text!");
+                    }
+                })
+                .await
         };
         let frame = &b"\x81\x06foobar"[..];
-        connection_back_rx.borrow_mut().web_socket_input(frame);
+        connection_back_rx.web_socket_input(frame);
         assert_eq!(
-            Ok(true),
+            Ok(()),
             executor::block_on(timeout(
                 REASONABLE_FAST_OPERATION_TIMEOUT,
                 reader,
@@ -1231,32 +1313,29 @@ mod tests {
     #[test]
     fn receive_binary() {
         let (connection_tx, _connection_back_tx) = mock_connection::Tx::new();
-        let (connection_rx, connection_back_rx) = mock_connection::Rx::new();
+        let (connection_rx, mut connection_back_rx) =
+            mock_connection::Rx::new();
         let ws = WebSocket::new(
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Transmit,
         );
-        let connection_back_rx = RefCell::new(connection_back_rx);
         let reader = async {
-            ws.fold(false, |_, message| async {
-                if let StreamMessage::Binary(message) = message {
-                    // Check that the message is correct.
-                    assert_eq!("foobar".as_bytes(), message);
-
-                    // Now the we're done, we can close the connection.
-                    connection_back_rx.borrow_mut().close().await;
-                    true
-                } else {
-                    panic!("we got something that isn't a binary!");
-                }
-            })
-            .await
+            ws.take(1)
+                .for_each(|message| async {
+                    if let StreamMessage::Binary(message) = message {
+                        // Check that the message is correct.
+                        assert_eq!("foobar".as_bytes(), message);
+                    } else {
+                        panic!("we got something that isn't a binary!");
+                    }
+                })
+                .await
         };
         let frame = &b"\x82\x06foobar"[..];
-        connection_back_rx.borrow_mut().web_socket_input(frame);
+        connection_back_rx.web_socket_input(frame);
         assert_eq!(
-            Ok(true),
+            Ok(()),
             executor::block_on(timeout(
                 REASONABLE_FAST_OPERATION_TIMEOUT,
                 reader,
@@ -1294,27 +1373,24 @@ mod tests {
     #[test]
     fn receive_masked() {
         let (connection_tx, _connection_back_tx) = mock_connection::Tx::new();
-        let (connection_rx, connection_back_rx) = mock_connection::Rx::new();
+        let (connection_rx, mut connection_back_rx) =
+            mock_connection::Rx::new();
         let ws = WebSocket::new(
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
         );
-        let connection_back_rx = RefCell::new(connection_back_rx);
         let reader = async {
-            ws.fold(false, |_, message| async {
-                if let StreamMessage::Text(message) = message {
-                    // Check that the message is correct.
-                    assert_eq!("foobar", message);
-
-                    // Now the we're done, we can close the connection.
-                    connection_back_rx.borrow_mut().close().await;
-                    true
-                } else {
-                    panic!("we got something that isn't a text!");
-                }
-            })
-            .await
+            ws.take(1)
+                .for_each(|message| async {
+                    if let StreamMessage::Text(message) = message {
+                        // Check that the message is correct.
+                        assert_eq!("foobar", message);
+                    } else {
+                        panic!("we got something that isn't a text!");
+                    }
+                })
+                .await
         };
         let mask = [0x12, 0x34, 0x56, 0x78];
         let data = "foobar";
@@ -1329,9 +1405,9 @@ mod tests {
                     .map(|(&data_byte, &mask_byte)| data_byte ^ mask_byte),
             )
             .collect::<Vec<u8>>();
-        connection_back_rx.borrow_mut().web_socket_input(frame);
+        connection_back_rx.web_socket_input(frame);
         assert_eq!(
-            Ok(true),
+            Ok(()),
             executor::block_on(timeout(
                 REASONABLE_FAST_OPERATION_TIMEOUT,
                 reader,
@@ -1422,36 +1498,33 @@ mod tests {
     #[test]
     fn receive_fragmented_text() {
         let (connection_tx, _connection_back_tx) = mock_connection::Tx::new();
-        let (connection_rx, connection_back_rx) = mock_connection::Rx::new();
+        let (connection_rx, mut connection_back_rx) =
+            mock_connection::Rx::new();
         let ws = WebSocket::new(
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Transmit,
         );
-        let connection_back_rx = RefCell::new(connection_back_rx);
         let reader = async {
-            ws.fold(false, |_, message| async {
-                if let StreamMessage::Text(message) = message {
-                    // Check that the message is correct.
-                    assert_eq!("foobar", message);
-
-                    // Now the we're done, we can close the connection.
-                    connection_back_rx.borrow_mut().close().await;
-                    true
-                } else {
-                    panic!("we got something that isn't a text!");
-                }
-            })
-            .await
+            ws.take(1)
+                .for_each(|message| async {
+                    if let StreamMessage::Text(message) = message {
+                        // Check that the message is correct.
+                        assert_eq!("foobar", message);
+                    } else {
+                        panic!("we got something that isn't a text!");
+                    }
+                })
+                .await
         };
         for &frame in
             [&b"\x01\x03foo"[..], &b"\x00\x01b"[..], &b"\x80\x02ar"[..]][..]
                 .iter()
         {
-            connection_back_rx.borrow_mut().web_socket_input(frame);
+            connection_back_rx.web_socket_input(frame);
         }
         assert_eq!(
-            Ok(true),
+            Ok(()),
             executor::block_on(timeout(
                 REASONABLE_FAST_OPERATION_TIMEOUT,
                 reader,
@@ -1469,11 +1542,10 @@ mod tests {
             MaskDirection::Receive,
         );
         let (mut sink, stream) = ws.split();
-        let connection_back_tx = RefCell::new(connection_back_tx);
-        let connection_back_rx = RefCell::new(connection_back_rx);
         let reader = async {
             stream
-                .fold(false, |_, message| async {
+                .take(1)
+                .for_each(|message| async {
                     if let StreamMessage::Close {
                         code,
                         reason,
@@ -1482,16 +1554,14 @@ mod tests {
                         // Check that the code and reason are correct.
                         assert_eq!(1005, code);
                         assert_eq!("", reason);
-
-                        // Now the we're done, we can close the connection.
-                        connection_back_rx.borrow_mut().close().await;
-                        true
                     } else {
                         panic!("we got something that isn't a text!");
                     }
                 })
                 .await
         };
+        let connection_back_tx = RefCell::new(connection_back_tx);
+        let connection_back_rx = RefCell::new(connection_back_rx);
         let writer = async {
             // Verify the WebSocket sends out the "CLOSE" message.
             assert_eq!(
@@ -1519,7 +1589,7 @@ mod tests {
         })
         .is_ok());
         assert_eq!(
-            Ok((true, ())),
+            Ok(((), ())),
             executor::block_on(timeout(
                 REASONABLE_FAST_OPERATION_TIMEOUT,
                 async { futures::join!(reader, writer) }
@@ -1539,11 +1609,10 @@ mod tests {
             MaskDirection::Receive,
         );
         let (mut sink, stream) = ws.split();
-        let connection_back_tx = RefCell::new(connection_back_tx);
-        let connection_back_rx = RefCell::new(connection_back_rx);
         let reader = async {
             stream
-                .fold(false, |_, message| async {
+                .take(1)
+                .for_each(|message| async {
                     if let StreamMessage::Close {
                         code,
                         reason,
@@ -1552,16 +1621,14 @@ mod tests {
                         // Check that the code and reason are correct.
                         assert_eq!(1000, code);
                         assert_eq!("Bye", reason);
-
-                        // Now the we're done, we can close the connection.
-                        connection_back_rx.borrow_mut().close().await;
-                        true
                     } else {
                         panic!("we got something that isn't a close!");
                     }
                 })
                 .await
         };
+        let connection_back_tx = RefCell::new(connection_back_tx);
+        let connection_back_rx = RefCell::new(connection_back_rx);
         let writer = async {
             // Verify the WebSocket sends out the "CLOSE" message.
             assert_eq!(
@@ -1638,7 +1705,7 @@ mod tests {
             Err(Error::Closed)
         ));
         assert_eq!(
-            Ok((true, ())),
+            Ok(((), ())),
             executor::block_on(timeout(
                 REASONABLE_FAST_OPERATION_TIMEOUT,
                 async { futures::join!(reader, writer) }
@@ -1663,7 +1730,8 @@ mod tests {
         let sink = RefCell::new(sink);
         let reader = async {
             stream
-                .fold(false, |_, message| async {
+                .take(1)
+                .for_each(|message| async {
                     match message {
                         StreamMessage::Close {
                             code,
@@ -1674,12 +1742,12 @@ mod tests {
                             assert_eq!("", reason);
 
                             // Send a "PING" out before we close our end.
-                            assert!(sink
-                                .borrow_mut()
-                                .send(SinkMessage::Ping(vec![]))
-                                .await
-                                .is_ok());
-                            true
+                            assert!(dbg!(
+                                sink.borrow_mut()
+                                    .send(SinkMessage::Ping(vec![]))
+                                    .await
+                            )
+                            .is_ok());
                         },
 
                         _ => panic!("we got something that isn't a close!"),
@@ -1721,7 +1789,7 @@ mod tests {
         };
         connection_back_rx.borrow_mut().web_socket_input(&b"\x88\x80XXXX"[..]);
         assert_eq!(
-            Ok((true, ())),
+            Ok(((), ())),
             executor::block_on(timeout(
                 REASONABLE_FAST_OPERATION_TIMEOUT,
                 async { futures::join!(reader, writer) }
@@ -1741,29 +1809,32 @@ mod tests {
         );
         let connection_back_rx = RefCell::new(connection_back_rx);
         let reader = async {
-            ws.fold(false, |_, message| async {
-                match message {
-                    StreamMessage::Close {
-                        code,
-                        reason,
-                    } => {
-                        // Check that the code and reason are correct.
-                        assert_eq!(1002, code);
-                        assert_eq!("reserved bits set", reason);
+            let result = ws
+                .fold(false, |_, message| async {
+                    match message {
+                        StreamMessage::Close {
+                            code,
+                            reason,
+                        } => {
+                            // Check that the code and reason are correct.
+                            assert_eq!(1002, code);
+                            assert_eq!("reserved bits set", reason);
 
-                        // Now the we're done, we can close the connection.
-                        connection_back_rx.borrow_mut().close().await;
-                        true
-                    },
+                            // Now the we're done, we can close the connection.
+                            connection_back_rx.borrow_mut().close().await;
+                            true
+                        },
 
-                    _ => panic!("we got something that isn't a close!"),
-                }
-            })
-            .await
+                        _ => panic!("we got something that isn't a close!"),
+                    }
+                })
+                .await;
+            println!("End of stream.");
+            result
         };
         connection_back_rx.borrow_mut().web_socket_input(&b"\x99\x80XXXX"[..]);
         assert_eq!(
-            Some(&b"\x88\x13\xeareserved bits set"[..]),
+            Some(&b"\x88\x13\x03\xeareserved bits set"[..]),
             connection_back_tx.web_socket_output().as_deref()
         );
         assert_eq!(

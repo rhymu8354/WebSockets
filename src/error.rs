@@ -109,7 +109,11 @@ pub enum Error {
 
     /// A text message was received that is not valid UTF-8.
     #[error("text message received is not valid UTF-8")]
-    Utf8(#[source] std::str::Utf8Error),
+    Utf8 {
+        #[source]
+        source: std::str::Utf8Error,
+        context: &'static str,
+    },
 
     /// The WebSocket received a continuation frame when no message
     /// reconstruction was in progress.
