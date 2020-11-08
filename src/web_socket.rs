@@ -414,22 +414,12 @@ async fn receive_frame(
     received_messages: &Mutex<ReceivedMessages>,
     message_handler: &Mutex<MessageHandler>,
 ) -> Result<ReceivedCloseFrame, Error> {
-    // TODO: I don't remember if this is actually necessary.  Receiving
-    // data after we have received a `Close` frame *is* illegal, but in
-    // this implementation, we may have completed the worker thread's tasks
-    // and never ever try to read more data from the connection.
-    //
-    // if closeReceived {
-    //     return;
-    // }
-
     // Decode the FIN flag.
     let fin = (frame_reassembly_buffer[0] & FIN) != 0;
 
     // Decode the reserved bits, and reject the frame if any are set.
     let reserved_bits = (frame_reassembly_buffer[0] >> 4) & 0x07;
     if reserved_bits != 0 {
-        //        close(1002, "reserved bits set", true);
         return Err(Error::BadFrame("reserved bits set"));
     }
 
@@ -441,11 +431,9 @@ async fn receive_frame(
     // it should be clear.
     match (mask, mask_direction) {
         (true, MaskDirection::Transmit) => {
-            // Close(1002, "masked frame", true);
             return Err(Error::BadFrame("masked frame"));
         },
         (false, MaskDirection::Receive) => {
-            // Close(1002, "unmasked frame", true);
             return Err(Error::BadFrame("unmasked frame"));
         },
         _ => (),
@@ -536,12 +524,6 @@ async fn receive_frame(
             // TODO: Check to see if we should verify FIN is set.
             // It doesn't make any sense for it to be clear, since a ping
             // frame can never be fragmented.
-            //
-            // TODO: Using `work_in_sender` to send the PONG puts the PONG
-            // at the "back of the line" which could cause issues if a lot
-            // of messages are sitting in the channel waiting to be sent.
-            // It would be better if we could "cut to the front of the line"
-            // to send the PONG.
             message_handler
                 .lock()
                 .await
@@ -582,10 +564,7 @@ async fn receive_frame(
             Ok(ReceivedCloseFrame::Yes)
         },
 
-        _ => {
-            // Close(1002, "unknown opcode", true);
-            Err(Error::BadFrame("unknown opcode"))
-        },
+        _ => Err(Error::BadFrame("unknown opcode")),
     }
 }
 
