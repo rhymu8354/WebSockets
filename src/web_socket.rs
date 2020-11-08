@@ -645,7 +645,6 @@ async fn try_receive_frames(
                 header_length += 4;
             }
             let frame_length = header_length + payload_length;
-            // TODO: We will need a way to configure the maximum frame size.
             if let Some(max_frame_size) = max_frame_size {
                 if frame_length > max_frame_size {
                     return Err(Error::FramePayloadTooLarge);
@@ -677,12 +676,9 @@ async fn try_receive_frames(
             // Try to recover more frames from what we already received,
             // before reading more.
             need_more_input = false;
-        } else {
-            // TODO: We will need a way to configure the maximum frame size.
-            if let Some(max_frame_size) = max_frame_size {
-                if frame_reassembly_buffer.len() >= max_frame_size {
-                    return Err(Error::FramePayloadTooLarge);
-                }
+        } else if let Some(max_frame_size) = max_frame_size {
+            if frame_reassembly_buffer.len() >= max_frame_size {
+                return Err(Error::FramePayloadTooLarge);
             }
         }
     }
@@ -737,6 +733,7 @@ async fn worker(
     connection_tx: Box<dyn ConnectionTx>,
     connection_rx: Box<dyn ConnectionRx>,
     mask_direction: MaskDirection,
+    max_frame_size: Option<usize>,
 ) {
     // Drive to completion the stream of messages to the worker thread.
     let (close_sent_sender, close_sent_receiver) = oneshot::channel();
@@ -750,7 +747,7 @@ async fn worker(
     let receive_frames_future = receive_frames(
         connection_rx,
         received_messages,
-        None, // TODO: allow this to be configured.
+        max_frame_size,
         mask_direction,
         &message_handler,
         close_sent_receiver,
@@ -796,6 +793,7 @@ impl WebSocket {
         connection_tx: Box<dyn ConnectionTx>,
         connection_rx: Box<dyn ConnectionRx>,
         mask_direction: MaskDirection,
+        max_frame_size: Option<usize>,
     ) -> Self {
         // Make the channel used to communicate with the worker thread.
         let (sender, receiver) = mpsc::unbounded();
@@ -822,6 +820,7 @@ impl WebSocket {
                     connection_tx,
                     connection_rx,
                     mask_direction,
+                    max_frame_size,
                 ))
             })),
         }
@@ -1069,6 +1068,7 @@ impl Drop for WebSocket {
 
 #[cfg(test)]
 #[allow(clippy::string_lit_as_bytes)]
+#[allow(clippy::non_ascii_literal)]
 mod tests {
     use super::*;
     use crate::mock_connection;
@@ -1087,6 +1087,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            None,
         );
         assert!(ws.ping("Hello").is_ok());
         assert_eq!(
@@ -1104,6 +1105,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            None,
         );
         assert!(ws.ping("").is_ok());
         assert_eq!(
@@ -1121,6 +1123,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            None,
         );
         assert!(ws.ping("x".repeat(125)).is_ok());
         let mut expected_output = vec![0x89, 0x7D];
@@ -1140,6 +1143,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            None,
         );
         assert!(matches!(
             ws.ping("x".repeat(126)),
@@ -1157,6 +1161,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Transmit,
+            None,
         );
         let connection_back_tx = &RefCell::new(connection_back_tx);
         let reader = async {
@@ -1213,6 +1218,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Transmit,
+            None,
         );
         let reader = async {
             ws.take(1)
@@ -1246,6 +1252,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            None,
         );
         assert!(ws.text("Hello, World!", LastFragment::Yes).is_ok());
         assert_eq!(
@@ -1263,6 +1270,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Transmit,
+            None,
         );
         let reader = async {
             ws.take(1)
@@ -1296,6 +1304,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            None,
         );
         assert!(ws
             .binary("Hello, World!".as_bytes(), LastFragment::Yes)
@@ -1315,6 +1324,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Transmit,
+            None,
         );
         let reader = async {
             ws.take(1)
@@ -1348,6 +1358,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Transmit,
+            None,
         );
         let data = "Hello, World!";
         assert!(ws.text(data, LastFragment::Yes).is_ok());
@@ -1375,6 +1386,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            None,
         );
         let reader = async {
             ws.take(1)
@@ -1420,6 +1432,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            None,
         );
         assert!(ws.text("Hello,", LastFragment::No).is_ok());
         assert_eq!(
@@ -1460,6 +1473,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            None,
         );
         assert!(ws.binary(&b"Hello,"[..], LastFragment::No).is_ok());
         assert_eq!(
@@ -1500,6 +1514,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Transmit,
+            None,
         );
         let reader = async {
             ws.take(1)
@@ -1536,6 +1551,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            None,
         );
         let (mut sink, stream) = ws.split();
         let reader = async {
@@ -1602,6 +1618,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            None,
         );
         let (mut sink, stream) = ws.split();
         let reader = async {
@@ -1718,6 +1735,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            None,
         );
         let (sink, stream) = ws.split();
         let connection_back_tx = RefCell::new(connection_back_tx);
@@ -1801,6 +1819,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            None,
         );
         let connection_back_rx = RefCell::new(connection_back_rx);
         let reader = async {
@@ -1847,6 +1866,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            None,
         );
         let connection_back_rx = RefCell::new(connection_back_rx);
         let reader = async {
@@ -1893,6 +1913,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            None,
         );
         let connection_back_rx = RefCell::new(connection_back_rx);
         let reader = async {
@@ -1940,6 +1961,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            None,
         );
         let connection_back_rx = RefCell::new(connection_back_rx);
         let reader = async {
@@ -1987,6 +2009,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            None,
         );
         let connection_back_rx = RefCell::new(connection_back_rx);
         let reader = async {
@@ -2033,6 +2056,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            None,
         );
         let connection_back_rx = RefCell::new(connection_back_rx);
         let reader = async {
@@ -2079,6 +2103,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Transmit,
+            None,
         );
         let connection_back_rx = RefCell::new(connection_back_rx);
         let reader = async {
@@ -2114,6 +2139,312 @@ mod tests {
                 .map(|(&byte, &mask)| byte ^ mask)
                 .eq(b"\x03\xeamasked frame"[..].iter().copied())
         ));
+        assert_eq!(
+            Ok(true),
+            executor::block_on(timeout(
+                REASONABLE_FAST_OPERATION_TIMEOUT,
+                reader,
+            ))
+        );
+    }
+
+    #[test]
+    fn connection_unexpectedly_broken() {
+        let (connection_tx, _connection_back_tx) = mock_connection::Tx::new();
+        let (connection_rx, connection_back_rx) = mock_connection::Rx::new();
+        let ws = WebSocket::new(
+            Box::new(connection_tx),
+            Box::new(connection_rx),
+            MaskDirection::Receive,
+            None,
+        );
+        let connection_back_rx = RefCell::new(connection_back_rx);
+        let reader = async {
+            ws.fold(false, |_, message| async {
+                match message {
+                    StreamMessage::Close {
+                        code,
+                        reason,
+                    } => {
+                        // Check that the code and reason are correct.
+                        assert_eq!(1006, code);
+                        assert_eq!(
+                            "underlying connection closed gracefully",
+                            reason
+                        );
+
+                        // Now the we're done, we can close the connection.
+                        connection_back_rx.borrow_mut().close().await;
+                        true
+                    },
+
+                    _ => panic!("we got something that isn't a close!"),
+                }
+            })
+            .await
+        };
+        executor::block_on(async {
+            connection_back_rx.borrow_mut().close().await;
+        });
+        assert_eq!(
+            Ok(true),
+            executor::block_on(timeout(
+                REASONABLE_FAST_OPERATION_TIMEOUT,
+                reader,
+            ))
+        );
+    }
+
+    #[test]
+    fn bad_utf8_in_text() {
+        let (connection_tx, mut connection_back_tx) =
+            mock_connection::Tx::new();
+        let (connection_rx, connection_back_rx) = mock_connection::Rx::new();
+        let ws = WebSocket::new(
+            Box::new(connection_tx),
+            Box::new(connection_rx),
+            MaskDirection::Receive,
+            None,
+        );
+        let connection_back_rx = RefCell::new(connection_back_rx);
+        let reader = async {
+            ws.fold(false, |_, message| async {
+                match message {
+                    StreamMessage::Close {
+                        code,
+                        reason,
+                    } => {
+                        // Check that the code and reason are correct.
+                        assert_eq!(1007, code);
+                        assert_eq!(
+                            "invalid UTF-8 encoding in text message",
+                            reason
+                        );
+
+                        // Now the we're done, we can close the connection.
+                        connection_back_rx.borrow_mut().close().await;
+                        true
+                    },
+
+                    _ => panic!("we got something that isn't a close!"),
+                }
+            })
+            .await
+        };
+        connection_back_rx.borrow_mut().web_socket_input(
+            b"\x81\x82"[..]
+                .iter()
+                .copied()
+                .chain({
+                    let mask = b"\x12\x34\x56\x78";
+                    let payload = b"\xc0\xaf";
+                    mask.iter().copied().chain(
+                        payload
+                            .iter()
+                            .zip(mask.iter().cycle())
+                            .map(|(&byte, &mask)| byte ^ mask),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(
+            Some(
+                &b"\x88\x28\x03\xefinvalid UTF-8 encoding in text message"[..]
+            ),
+            connection_back_tx.web_socket_output().as_deref()
+        );
+        assert_eq!(
+            Ok(true),
+            executor::block_on(timeout(
+                REASONABLE_FAST_OPERATION_TIMEOUT,
+                reader,
+            ))
+        );
+    }
+
+    #[test]
+    fn good_utf8_in_text_split_into_fragments() {
+        let (connection_tx, _connection_back_tx) = mock_connection::Tx::new();
+        let (connection_rx, connection_back_rx) = mock_connection::Rx::new();
+        let ws = WebSocket::new(
+            Box::new(connection_tx),
+            Box::new(connection_rx),
+            MaskDirection::Transmit,
+            None,
+        );
+        let connection_back_rx = RefCell::new(connection_back_rx);
+        let reader = async {
+            ws.take(1)
+                .for_each(|message| async {
+                    match message {
+                        StreamMessage::Text(message) => {
+                            // Check that the message was decoded correctly.
+                            assert_eq!("𣎴", message);
+                        },
+
+                        _ => panic!("we got something that isn't a text!"),
+                    }
+                })
+                .await
+        };
+        connection_back_rx
+            .borrow_mut()
+            .web_socket_input(&b"\x01\x02\xF0\xA3"[..]);
+        connection_back_rx
+            .borrow_mut()
+            .web_socket_input(&b"\x80\x02\x8E\xB4"[..]);
+        assert_eq!(
+            Ok(()),
+            executor::block_on(timeout(
+                REASONABLE_FAST_OPERATION_TIMEOUT,
+                reader,
+            ))
+        );
+    }
+
+    #[test]
+    fn bad_utf8_truncated_in_text_split_into_fragments() {
+        let (connection_tx, _connection_back_tx) = mock_connection::Tx::new();
+        let (connection_rx, connection_back_rx) = mock_connection::Rx::new();
+        let ws = WebSocket::new(
+            Box::new(connection_tx),
+            Box::new(connection_rx),
+            MaskDirection::Transmit,
+            None,
+        );
+        let connection_back_rx = RefCell::new(connection_back_rx);
+        let reader = async {
+            ws.fold(false, |_, message| async {
+                match message {
+                    StreamMessage::Close {
+                        code,
+                        reason,
+                    } => {
+                        // Check that the code and reason are correct.
+                        assert_eq!(1007, code);
+                        assert_eq!(
+                            "invalid UTF-8 encoding in text message",
+                            reason
+                        );
+
+                        // Now the we're done, we can close the connection.
+                        connection_back_rx.borrow_mut().close().await;
+                        true
+                    },
+
+                    _ => panic!("we got something that isn't a close!"),
+                }
+            })
+            .await
+        };
+        connection_back_rx
+            .borrow_mut()
+            .web_socket_input(&b"\x01\x02\xF0\xA3"[..]);
+        connection_back_rx.borrow_mut().web_socket_input(&b"\x80\x01\x8E"[..]);
+        assert_eq!(
+            Ok(true),
+            executor::block_on(timeout(
+                REASONABLE_FAST_OPERATION_TIMEOUT,
+                reader,
+            ))
+        );
+    }
+
+    #[test]
+    fn receive_close_invalid_utf8_in_reason() {
+        let (connection_tx, _connection_back_tx) = mock_connection::Tx::new();
+        let (connection_rx, connection_back_rx) = mock_connection::Rx::new();
+        let ws = WebSocket::new(
+            Box::new(connection_tx),
+            Box::new(connection_rx),
+            MaskDirection::Receive,
+            None,
+        );
+        let connection_back_rx = RefCell::new(connection_back_rx);
+        let reader = async {
+            ws.fold(false, |_, message| async {
+                match message {
+                    StreamMessage::Close {
+                        code,
+                        reason,
+                    } => {
+                        // Check that the code and reason are correct.
+                        assert_eq!(1007, code);
+                        assert_eq!(
+                            "invalid UTF-8 encoding in close reason",
+                            reason
+                        );
+
+                        // Now the we're done, we can close the connection.
+                        connection_back_rx.borrow_mut().close().await;
+                        true
+                    },
+
+                    _ => panic!("we got something that isn't a close!"),
+                }
+            })
+            .await
+        };
+        connection_back_rx.borrow_mut().web_socket_input(
+            b"\x88\x84"[..]
+                .iter()
+                .copied()
+                .chain({
+                    let mask = b"\x12\x34\x56\x78";
+                    let payload = b"\x03\xe8\xc0\xaf";
+                    mask.iter().copied().chain(
+                        payload
+                            .iter()
+                            .zip(mask.iter().cycle())
+                            .map(|(&byte, &mask)| byte ^ mask),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(
+            Ok(true),
+            executor::block_on(timeout(
+                REASONABLE_FAST_OPERATION_TIMEOUT,
+                reader,
+            ))
+        );
+    }
+
+    #[test]
+    fn drop_connection_if_frame_too_large() {
+        let (connection_tx, _connection_back_tx) = mock_connection::Tx::new();
+        let (connection_rx, connection_back_rx) = mock_connection::Rx::new();
+        let ws = WebSocket::new(
+            Box::new(connection_tx),
+            Box::new(connection_rx),
+            MaskDirection::Transmit,
+            Some(7),
+        );
+        let connection_back_rx = RefCell::new(connection_back_rx);
+        let reader = async {
+            ws.fold(false, |_, message| async {
+                match message {
+                    StreamMessage::Close {
+                        code,
+                        reason,
+                    } => {
+                        // Check that the code and reason are correct.
+                        assert_eq!(1009, code);
+                        assert_eq!("frame too large", reason);
+
+                        // Now the we're done, we can close the connection.
+                        connection_back_rx.borrow_mut().close().await;
+                        true
+                    },
+
+                    _ => panic!("we got something that isn't a close!"),
+                }
+            })
+            .await
+        };
+        connection_back_rx
+            .borrow_mut()
+            .web_socket_input(&b"\x81\x06foobar"[..]);
         assert_eq!(
             Ok(true),
             executor::block_on(timeout(

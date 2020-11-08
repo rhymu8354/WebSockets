@@ -48,6 +48,7 @@ pub fn open_server(
     connection_tx: Box<dyn ConnectionTx>,
     connection_rx: Box<dyn ConnectionRx>,
     request: &Request,
+    max_frame_size: Option<usize>,
 ) -> Result<(WebSocket, Response), Error> {
     match request {
         _ if request.method != "GET" => Err(Error::WrongHttpMethod),
@@ -88,6 +89,7 @@ pub fn open_server(
                     connection_tx,
                     connection_rx,
                     MaskDirection::Receive,
+                    max_frame_size,
                 ),
                 response,
             ))
@@ -133,6 +135,7 @@ impl WebSocketClientBuilder {
         connection_tx: Box<dyn ConnectionTx>,
         connection_rx: Box<dyn ConnectionRx>,
         response: &Response,
+        max_frame_size: Option<usize>,
     ) -> Result<WebSocket, Error> {
         match response {
             _ if response.status_code != 101 => Err(Error::ProtocolNotSwitched),
@@ -174,6 +177,7 @@ impl WebSocketClientBuilder {
                 connection_tx,
                 connection_rx,
                 MaskDirection::Transmit,
+                max_frame_size,
             )),
         }
     }
@@ -186,8 +190,9 @@ impl WebSocketServerBuilder {
         connection_tx: Box<dyn ConnectionTx>,
         connection_rx: Box<dyn ConnectionRx>,
         request: &Request,
+        max_frame_size: Option<usize>,
     ) -> Result<(WebSocket, Response), Error> {
-        open_server(connection_tx, connection_rx, request)
+        open_server(connection_tx, connection_rx, request, max_frame_size)
     }
 }
 
@@ -240,7 +245,8 @@ mod tests {
             ws.finish_open(
                 Box::new(connection_tx),
                 Box::new(connection_rx),
-                &response
+                &response,
+                None,
             ),
             Err(Error::ProtocolNotUpgradedToWebSocket)
         ));
@@ -266,7 +272,8 @@ mod tests {
             ws.finish_open(
                 Box::new(connection_tx),
                 Box::new(connection_rx),
-                &response
+                &response,
+                None,
             ),
             Err(Error::ProtocolNotUpgradedToWebSocket)
         ));
@@ -291,7 +298,8 @@ mod tests {
             ws.finish_open(
                 Box::new(connection_tx),
                 Box::new(connection_rx),
-                &response
+                &response,
+                None,
             ),
             Err(Error::ConnectionNotUpgraded)
         ));
@@ -317,7 +325,8 @@ mod tests {
             ws.finish_open(
                 Box::new(connection_tx),
                 Box::new(connection_rx),
-                &response
+                &response,
+                None,
             ),
             Err(Error::ConnectionNotUpgraded)
         ));
@@ -336,7 +345,8 @@ mod tests {
             ws.finish_open(
                 Box::new(connection_tx),
                 Box::new(connection_rx),
-                &response
+                &response,
+                None,
             ),
             Err(Error::InvalidHandshakeResponse)
         ));
@@ -362,7 +372,8 @@ mod tests {
             ws.finish_open(
                 Box::new(connection_tx),
                 Box::new(connection_rx),
-                &response
+                &response,
+                None,
             ),
             Err(Error::InvalidHandshakeResponse)
         ));
@@ -389,7 +400,8 @@ mod tests {
             ws.finish_open(
                 Box::new(connection_tx),
                 Box::new(connection_rx),
-                &response
+                &response,
+                None,
             ),
             Err(Error::ExtensionNotRequested)
         ));
@@ -416,7 +428,8 @@ mod tests {
             .finish_open(
                 Box::new(connection_tx),
                 Box::new(connection_rx),
-                &response
+                &response,
+                None,
             )
             .is_ok());
     }
@@ -442,7 +455,8 @@ mod tests {
             ws.finish_open(
                 Box::new(connection_tx),
                 Box::new(connection_rx),
-                &response
+                &response,
+                None,
             ),
             Err(Error::SubprotocolNotRequested)
         ));
@@ -469,7 +483,8 @@ mod tests {
             .finish_open(
                 Box::new(connection_tx),
                 Box::new(connection_rx),
-                &response
+                &response,
+                None,
             )
             .is_ok());
     }
@@ -499,6 +514,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             &response,
+            None,
         );
         assert!(open_result.is_ok());
         let mut ws = open_result.unwrap();
@@ -539,6 +555,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             &request,
+            None,
         );
         assert!(open_result.is_ok());
         let (mut ws, response) = open_result.unwrap();
@@ -581,6 +598,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             &request,
+            None,
         );
         assert!(open_result.is_ok());
     }
@@ -601,7 +619,8 @@ mod tests {
             WebSocketServerBuilder::open(
                 Box::new(connection_tx),
                 Box::new(connection_rx),
-                &request
+                &request,
+                None,
             ),
             Err(Error::WrongHttpMethod)
         ));
@@ -622,7 +641,8 @@ mod tests {
             WebSocketServerBuilder::open(
                 Box::new(connection_tx),
                 Box::new(connection_rx),
-                &request
+                &request,
+                None,
             ),
             Err(Error::ProtocolUpgradeRequstNotAWebSocket)
         ));
@@ -644,7 +664,8 @@ mod tests {
             WebSocketServerBuilder::open(
                 Box::new(connection_tx),
                 Box::new(connection_rx),
-                &request
+                &request,
+                None,
             ),
             Err(Error::ProtocolUpgradeRequstNotAWebSocket)
         ));
@@ -665,7 +686,8 @@ mod tests {
             WebSocketServerBuilder::open(
                 Box::new(connection_tx),
                 Box::new(connection_rx),
-                &request
+                &request,
+                None,
             ),
             Err(Error::UpgradeNotRequested)
         ));
@@ -687,7 +709,8 @@ mod tests {
             WebSocketServerBuilder::open(
                 Box::new(connection_tx),
                 Box::new(connection_rx),
-                &request
+                &request,
+                None,
             ),
             Err(Error::UpgradeNotRequested)
         ));
@@ -706,7 +729,8 @@ mod tests {
             WebSocketServerBuilder::open(
                 Box::new(connection_tx),
                 Box::new(connection_rx),
-                &request
+                &request,
+                None,
             ),
             Err(Error::HandshakeNotProperlyStarted)
         ));
@@ -731,7 +755,8 @@ mod tests {
             WebSocketServerBuilder::open(
                 Box::new(connection_tx),
                 Box::new(connection_rx),
-                &request
+                &request,
+                None,
             ),
             Err(Error::InvalidHandshakeRequest)
         ));
@@ -747,7 +772,8 @@ mod tests {
             WebSocketServerBuilder::open(
                 Box::new(connection_tx),
                 Box::new(connection_rx),
-                &request
+                &request,
+                None,
             ),
             Err(Error::InvalidHandshakeRequest)
         ));
@@ -762,7 +788,8 @@ mod tests {
         assert!(WebSocketServerBuilder::open(
             Box::new(connection_tx),
             Box::new(connection_rx),
-            &request
+            &request,
+            None,
         )
         .is_ok());
     }
@@ -782,7 +809,8 @@ mod tests {
             WebSocketServerBuilder::open(
                 Box::new(connection_tx),
                 Box::new(connection_rx),
-                &request
+                &request,
+                None,
             ),
             Err(Error::UnsupportedProtocolVersion)
         ));
@@ -807,7 +835,8 @@ mod tests {
             WebSocketServerBuilder::open(
                 Box::new(connection_tx),
                 Box::new(connection_rx),
-                &request
+                &request,
+                None,
             ),
             Err(Error::UnsupportedProtocolVersion)
         ));
@@ -820,7 +849,8 @@ mod tests {
             WebSocketServerBuilder::open(
                 Box::new(connection_tx),
                 Box::new(connection_rx),
-                &request
+                &request,
+                None,
             ),
             Err(Error::UnsupportedProtocolVersion)
         ));
@@ -832,7 +862,8 @@ mod tests {
         assert!(WebSocketServerBuilder::open(
             Box::new(connection_tx),
             Box::new(connection_rx),
-            &request
+            &request,
+            None,
         )
         .is_ok());
     }
