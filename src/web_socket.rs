@@ -501,7 +501,7 @@ async fn receive_frame(
                 )
                 .await?;
             } else {
-                return Err(Error::LastMessageUnfinished);
+                return Err(Error::BadFrame("last message incomplete"));
             }
             Ok(ReceivedCloseFrame::No)
         },
@@ -517,7 +517,7 @@ async fn receive_frame(
                 )
                 .await?
             } else {
-                return Err(Error::LastMessageUnfinished);
+                return Err(Error::BadFrame("last message incomplete"));
             }
             Ok(ReceivedCloseFrame::No)
         },
@@ -1875,6 +1875,245 @@ mod tests {
             Some(&b"\x88\x1F\x03\xeaunexpected continuation frame"[..]),
             connection_back_tx.web_socket_output().as_deref()
         );
+        assert_eq!(
+            Ok(true),
+            executor::block_on(timeout(
+                REASONABLE_FAST_OPERATION_TIMEOUT,
+                reader,
+            ))
+        );
+    }
+
+    #[test]
+    fn violation_new_text_message_during_fragmented_message() {
+        let (connection_tx, mut connection_back_tx) =
+            mock_connection::Tx::new();
+        let (connection_rx, connection_back_rx) = mock_connection::Rx::new();
+        let ws = WebSocket::new(
+            Box::new(connection_tx),
+            Box::new(connection_rx),
+            MaskDirection::Receive,
+        );
+        let connection_back_rx = RefCell::new(connection_back_rx);
+        let reader = async {
+            ws.fold(false, |_, message| async {
+                match message {
+                    StreamMessage::Close {
+                        code,
+                        reason,
+                    } => {
+                        // Check that the code and reason are correct.
+                        assert_eq!(1002, code);
+                        assert_eq!("last message incomplete", reason);
+
+                        // Now the we're done, we can close the connection.
+                        connection_back_rx.borrow_mut().close().await;
+                        true
+                    },
+
+                    _ => panic!("we got something that isn't a close!"),
+                }
+            })
+            .await
+        };
+        connection_back_rx.borrow_mut().web_socket_input(&b"\x01\x80XXXX"[..]);
+        connection_back_rx.borrow_mut().web_socket_input(&b"\x01\x80XXXX"[..]);
+        assert_eq!(
+            Some(&b"\x88\x19\x03\xealast message incomplete"[..]),
+            connection_back_tx.web_socket_output().as_deref()
+        );
+        assert_eq!(
+            Ok(true),
+            executor::block_on(timeout(
+                REASONABLE_FAST_OPERATION_TIMEOUT,
+                reader,
+            ))
+        );
+    }
+
+    #[test]
+    fn violation_new_binary_message_during_fragmented_message() {
+        let (connection_tx, mut connection_back_tx) =
+            mock_connection::Tx::new();
+        let (connection_rx, connection_back_rx) = mock_connection::Rx::new();
+        let ws = WebSocket::new(
+            Box::new(connection_tx),
+            Box::new(connection_rx),
+            MaskDirection::Receive,
+        );
+        let connection_back_rx = RefCell::new(connection_back_rx);
+        let reader = async {
+            ws.fold(false, |_, message| async {
+                match message {
+                    StreamMessage::Close {
+                        code,
+                        reason,
+                    } => {
+                        // Check that the code and reason are correct.
+                        assert_eq!(1002, code);
+                        assert_eq!("last message incomplete", reason);
+
+                        // Now the we're done, we can close the connection.
+                        connection_back_rx.borrow_mut().close().await;
+                        true
+                    },
+
+                    _ => panic!("we got something that isn't a close!"),
+                }
+            })
+            .await
+        };
+        connection_back_rx.borrow_mut().web_socket_input(&b"\x01\x80XXXX"[..]);
+        connection_back_rx.borrow_mut().web_socket_input(&b"\x02\x80XXXX"[..]);
+        assert_eq!(
+            Some(&b"\x88\x19\x03\xealast message incomplete"[..]),
+            connection_back_tx.web_socket_output().as_deref()
+        );
+        assert_eq!(
+            Ok(true),
+            executor::block_on(timeout(
+                REASONABLE_FAST_OPERATION_TIMEOUT,
+                reader,
+            ))
+        );
+    }
+
+    #[test]
+    fn violation_unknown_opcode() {
+        let (connection_tx, mut connection_back_tx) =
+            mock_connection::Tx::new();
+        let (connection_rx, connection_back_rx) = mock_connection::Rx::new();
+        let ws = WebSocket::new(
+            Box::new(connection_tx),
+            Box::new(connection_rx),
+            MaskDirection::Receive,
+        );
+        let connection_back_rx = RefCell::new(connection_back_rx);
+        let reader = async {
+            ws.fold(false, |_, message| async {
+                match message {
+                    StreamMessage::Close {
+                        code,
+                        reason,
+                    } => {
+                        // Check that the code and reason are correct.
+                        assert_eq!(1002, code);
+                        assert_eq!("unknown opcode", reason);
+
+                        // Now the we're done, we can close the connection.
+                        connection_back_rx.borrow_mut().close().await;
+                        true
+                    },
+
+                    _ => panic!("we got something that isn't a close!"),
+                }
+            })
+            .await
+        };
+        connection_back_rx.borrow_mut().web_socket_input(&b"\x83\x80XXXX"[..]);
+        assert_eq!(
+            Some(&b"\x88\x10\x03\xeaunknown opcode"[..]),
+            connection_back_tx.web_socket_output().as_deref()
+        );
+        assert_eq!(
+            Ok(true),
+            executor::block_on(timeout(
+                REASONABLE_FAST_OPERATION_TIMEOUT,
+                reader,
+            ))
+        );
+    }
+
+    #[test]
+    fn violation_client_should_mask_frames() {
+        let (connection_tx, mut connection_back_tx) =
+            mock_connection::Tx::new();
+        let (connection_rx, connection_back_rx) = mock_connection::Rx::new();
+        let ws = WebSocket::new(
+            Box::new(connection_tx),
+            Box::new(connection_rx),
+            MaskDirection::Receive,
+        );
+        let connection_back_rx = RefCell::new(connection_back_rx);
+        let reader = async {
+            ws.fold(false, |_, message| async {
+                match message {
+                    StreamMessage::Close {
+                        code,
+                        reason,
+                    } => {
+                        // Check that the code and reason are correct.
+                        assert_eq!(1002, code);
+                        assert_eq!("unmasked frame", reason);
+
+                        // Now the we're done, we can close the connection.
+                        connection_back_rx.borrow_mut().close().await;
+                        true
+                    },
+
+                    _ => panic!("we got something that isn't a close!"),
+                }
+            })
+            .await
+        };
+        connection_back_rx.borrow_mut().web_socket_input(&b"\x89\x00"[..]);
+        assert_eq!(
+            Some(&b"\x88\x10\x03\xeaunmasked frame"[..]),
+            connection_back_tx.web_socket_output().as_deref()
+        );
+        assert_eq!(
+            Ok(true),
+            executor::block_on(timeout(
+                REASONABLE_FAST_OPERATION_TIMEOUT,
+                reader,
+            ))
+        );
+    }
+
+    #[test]
+    fn violation_server_should_not_mask_frames() {
+        let (connection_tx, mut connection_back_tx) =
+            mock_connection::Tx::new();
+        let (connection_rx, connection_back_rx) = mock_connection::Rx::new();
+        let ws = WebSocket::new(
+            Box::new(connection_tx),
+            Box::new(connection_rx),
+            MaskDirection::Transmit,
+        );
+        let connection_back_rx = RefCell::new(connection_back_rx);
+        let reader = async {
+            ws.fold(false, |_, message| async {
+                match message {
+                    StreamMessage::Close {
+                        code,
+                        reason,
+                    } => {
+                        // Check that the code and reason are correct.
+                        assert_eq!(1002, code);
+                        assert_eq!("masked frame", reason);
+
+                        // Now the we're done, we can close the connection.
+                        connection_back_rx.borrow_mut().close().await;
+                        true
+                    },
+
+                    _ => panic!("we got something that isn't a close!"),
+                }
+            })
+            .await
+        };
+        connection_back_rx.borrow_mut().web_socket_input(&b"\x89\x80XXXX"[..]);
+        assert!(matches!(
+            connection_back_tx.web_socket_output().as_deref(),
+            Some(frame) if
+                frame.len() == 20
+                && frame[0..2] == b"\x88\x8E"[..]
+                && frame[6..].iter().zip(
+                    frame[2..6].iter().cycle()
+                )
+                .map(|(&byte, &mask)| byte ^ mask)
+                .eq(b"\x03\xeamasked frame"[..].iter().copied())
+        ));
         assert_eq!(
             Ok(true),
             executor::block_on(timeout(
