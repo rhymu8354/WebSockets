@@ -1544,7 +1544,6 @@ mod tests {
         let (mut sink, stream) = ws.split();
         let reader = async {
             stream
-                .take(1)
                 .for_each(|message| async {
                     if let StreamMessage::Close {
                         code,
