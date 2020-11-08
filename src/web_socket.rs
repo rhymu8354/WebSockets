@@ -5,7 +5,10 @@ use super::{
 };
 use async_mutex::Mutex;
 use futures::{
-    channel::mpsc,
+    channel::{
+        mpsc,
+        oneshot,
+    },
     executor,
     stream::{
         StreamExt,
@@ -175,7 +178,7 @@ fn close_code_and_reason_from_error(error: Error) -> (usize, String) {
 }
 
 struct MessageHandler {
-    close_sent: bool,
+    close_sent: Option<oneshot::Sender<()>>,
     connection_tx: Box<dyn ConnectionTx>,
     mask_direction: MaskDirection,
     rng: StdRng,
@@ -183,11 +186,12 @@ struct MessageHandler {
 
 impl MessageHandler {
     fn new(
+        close_sent: oneshot::Sender<()>,
         connection_tx: Box<dyn ConnectionTx>,
         mask_direction: MaskDirection,
     ) -> Self {
         Self {
-            close_sent: false,
+            close_sent: Some(close_sent),
             connection_tx,
             mask_direction,
             rng: StdRng::from_entropy(),
@@ -216,11 +220,8 @@ impl MessageHandler {
         mut payload: Vec<u8>,
     ) -> Result<(), Error> {
         // Do not send anything after sending "CLOSE".
-        if self.close_sent {
+        if self.close_sent.is_none() {
             return Err(Error::Closed);
-        }
-        if opcode == OPCODE_CLOSE {
-            self.close_sent = true;
         }
 
         // Pessimistically (meaning we might allocate more than we need)
@@ -297,10 +298,15 @@ impl MessageHandler {
         // may yield until the connection is able to receive all the bytes.
         //
         // If any error occurs, consider the connection to be broken.
-        self.connection_tx
-            .write_all(&frame)
-            .await
-            .map_err(Error::ConnectionBroken)
+        let written = self.connection_tx.write_all(&frame).await;
+        if opcode == OPCODE_CLOSE || written.is_err() {
+            let _ = self
+                .close_sent
+                .take()
+                .expect("should not send CLOSE twice")
+                .send(());
+        }
+        written.map_err(Error::ConnectionBroken)
     }
 
     async fn send_close(
@@ -591,6 +597,7 @@ async fn try_receive_frames(
     max_frame_size: Option<usize>,
     mask_direction: MaskDirection,
     message_handler: &Mutex<MessageHandler>,
+    close_sent_receiver: oneshot::Receiver<()>,
 ) -> Result<(), Error> {
     let mut frame_reassembly_buffer = Vec::new();
     let mut message_reassembly_buffer = Vec::new();
@@ -678,7 +685,8 @@ async fn try_receive_frames(
             )
             .await?
             {
-                futures::future::pending::<()>().await;
+                let _ = close_sent_receiver.await;
+                return Ok(());
             }
             // TODO: This is expensive, especially if we get a large number
             // of bytes following the frame we just received.  Look for
@@ -705,6 +713,7 @@ async fn receive_frames(
     max_frame_size: Option<usize>,
     mask_direction: MaskDirection,
     message_handler: &Mutex<MessageHandler>,
+    close_sent_receiver: oneshot::Receiver<()>,
 ) {
     if let Err(error) = try_receive_frames(
         connection_rx,
@@ -712,6 +721,7 @@ async fn receive_frames(
         max_frame_size,
         mask_direction,
         message_handler,
+        close_sent_receiver,
     )
     .await
     {
@@ -748,8 +758,12 @@ async fn worker(
     mask_direction: MaskDirection,
 ) {
     // Drive to completion the stream of messages to the worker thread.
-    let message_handler =
-        Mutex::new(MessageHandler::new(connection_tx, mask_direction));
+    let (close_sent_sender, close_sent_receiver) = oneshot::channel();
+    let message_handler = Mutex::new(MessageHandler::new(
+        close_sent_sender,
+        connection_tx,
+        mask_direction,
+    ));
     let handle_messages_future =
         handle_messages(work_in_receiver, &message_handler);
     let receive_frames_future = receive_frames(
@@ -758,6 +772,7 @@ async fn worker(
         None, // TODO: allow this to be configured.
         mask_direction,
         &message_handler,
+        close_sent_receiver,
     );
     futures::select!(
         _ = handle_messages_future.fuse() => {},
