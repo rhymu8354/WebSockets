@@ -462,7 +462,9 @@ async fn receive_frame(
         OPCODE_CONTINUATION => {
             match message_in_progress {
                 MessageInProgress::None => {
-                    return Err(Error::UnexpectedContinuationFrame)
+                    return Err(Error::BadFrame(
+                        "unexpected continuation frame",
+                    ))
                 },
                 MessageInProgress::Text => {
                     receive_frame_text(
@@ -1802,32 +1804,75 @@ mod tests {
         );
         let connection_back_rx = RefCell::new(connection_back_rx);
         let reader = async {
-            let result = ws
-                .fold(false, |_, message| async {
-                    match message {
-                        StreamMessage::Close {
-                            code,
-                            reason,
-                        } => {
-                            // Check that the code and reason are correct.
-                            assert_eq!(1002, code);
-                            assert_eq!("reserved bits set", reason);
+            ws.fold(false, |_, message| async {
+                match message {
+                    StreamMessage::Close {
+                        code,
+                        reason,
+                    } => {
+                        // Check that the code and reason are correct.
+                        assert_eq!(1002, code);
+                        assert_eq!("reserved bits set", reason);
 
-                            // Now the we're done, we can close the connection.
-                            connection_back_rx.borrow_mut().close().await;
-                            true
-                        },
+                        // Now the we're done, we can close the connection.
+                        connection_back_rx.borrow_mut().close().await;
+                        true
+                    },
 
-                        _ => panic!("we got something that isn't a close!"),
-                    }
-                })
-                .await;
-            println!("End of stream.");
-            result
+                    _ => panic!("we got something that isn't a close!"),
+                }
+            })
+            .await
         };
         connection_back_rx.borrow_mut().web_socket_input(&b"\x99\x80XXXX"[..]);
         assert_eq!(
             Some(&b"\x88\x13\x03\xeareserved bits set"[..]),
+            connection_back_tx.web_socket_output().as_deref()
+        );
+        assert_eq!(
+            Ok(true),
+            executor::block_on(timeout(
+                REASONABLE_FAST_OPERATION_TIMEOUT,
+                reader,
+            ))
+        );
+    }
+
+    #[test]
+    fn violation_unexpected_continuation() {
+        let (connection_tx, mut connection_back_tx) =
+            mock_connection::Tx::new();
+        let (connection_rx, connection_back_rx) = mock_connection::Rx::new();
+        let ws = WebSocket::new(
+            Box::new(connection_tx),
+            Box::new(connection_rx),
+            MaskDirection::Receive,
+        );
+        let connection_back_rx = RefCell::new(connection_back_rx);
+        let reader = async {
+            ws.fold(false, |_, message| async {
+                match message {
+                    StreamMessage::Close {
+                        code,
+                        reason,
+                    } => {
+                        // Check that the code and reason are correct.
+                        assert_eq!(1002, code);
+                        assert_eq!("unexpected continuation frame", reason);
+
+                        // Now the we're done, we can close the connection.
+                        connection_back_rx.borrow_mut().close().await;
+                        true
+                    },
+
+                    _ => panic!("we got something that isn't a close!"),
+                }
+            })
+            .await
+        };
+        connection_back_rx.borrow_mut().web_socket_input(&b"\x80\x80XXXX"[..]);
+        assert_eq!(
+            Some(&b"\x88\x1F\x03\xeaunexpected continuation frame"[..]),
             connection_back_tx.web_socket_output().as_deref()
         );
         assert_eq!(

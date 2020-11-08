@@ -115,11 +115,6 @@ pub enum Error {
         context: &'static str,
     },
 
-    /// The WebSocket received a continuation frame when no message
-    /// reconstruction was in progress.
-    #[error("received an unexpected continuation frame")]
-    UnexpectedContinuationFrame,
-
     /// The operation could not be completed because the WebSocket
     /// is already closed.
     #[error("WebSocket is already closed")]
