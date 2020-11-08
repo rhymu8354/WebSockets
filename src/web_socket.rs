@@ -597,7 +597,7 @@ async fn try_receive_frames(
     max_frame_size: Option<usize>,
     mask_direction: MaskDirection,
     message_handler: &Mutex<MessageHandler>,
-    close_sent_receiver: oneshot::Receiver<()>,
+    close_sent: oneshot::Receiver<()>,
 ) -> Result<(), Error> {
     let mut frame_reassembly_buffer = Vec::new();
     let mut message_reassembly_buffer = Vec::new();
@@ -685,7 +685,7 @@ async fn try_receive_frames(
             )
             .await?
             {
-                let _ = close_sent_receiver.await;
+                let _ = close_sent.await;
                 return Ok(());
             }
             // TODO: This is expensive, especially if we get a large number
@@ -713,7 +713,7 @@ async fn receive_frames(
     max_frame_size: Option<usize>,
     mask_direction: MaskDirection,
     message_handler: &Mutex<MessageHandler>,
-    close_sent_receiver: oneshot::Receiver<()>,
+    close_sent: oneshot::Receiver<()>,
 ) {
     if let Err(error) = try_receive_frames(
         connection_rx,
@@ -721,7 +721,7 @@ async fn receive_frames(
         max_frame_size,
         mask_direction,
         message_handler,
-        close_sent_receiver,
+        close_sent,
     )
     .await
     {
