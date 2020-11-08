@@ -678,7 +678,7 @@ async fn try_receive_frames(
             )
             .await?
             {
-                return Ok(());
+                futures::future::pending::<()>().await;
             }
             // TODO: This is expensive, especially if we get a large number
             // of bytes following the frame we just received.  Look for
