@@ -367,8 +367,6 @@ impl<'a> FrameReceiver<'a> {
         }
     }
 
-    // TODO: Refactor this function so we don't need to suppress these warnings.
-    #[allow(clippy::too_many_lines)]
     async fn receive_frame(
         &mut self,
         frame_reassembly_buffer: &[u8],
@@ -418,21 +416,10 @@ impl<'a> FrameReceiver<'a> {
             );
         }
 
+        // Interpret the payload depending on the opcode.
         match opcode {
             OPCODE_CONTINUATION => {
-                match self.message_in_progress {
-                    MessageInProgress::None => {
-                        return Err(Error::BadFrame(
-                            "unexpected continuation frame",
-                        ))
-                    },
-                    MessageInProgress::Text => {
-                        self.receive_frame_text(payload, fin).await?;
-                    },
-                    MessageInProgress::Binary => {
-                        self.receive_frame_binary(payload, fin).await?;
-                    },
-                }
+                self.receive_frame_continuation(payload, fin).await?;
                 Ok(ReceivedCloseFrame::No)
             },
 
@@ -458,15 +445,7 @@ impl<'a> FrameReceiver<'a> {
                 if !fin {
                     return Err(Error::BadFrame("fragmented control frame"));
                 }
-                self.message_handler
-                    .lock()
-                    .await
-                    .send_frame(SetFin::Yes, OPCODE_PONG, payload.clone())
-                    .await?;
-                self.received_messages
-                    .lock()
-                    .await
-                    .push(StreamMessage::Ping(payload));
+                self.receive_frame_ping(payload).await?;
                 Ok(ReceivedCloseFrame::No)
             },
 
@@ -485,25 +464,7 @@ impl<'a> FrameReceiver<'a> {
                 if !fin {
                     return Err(Error::BadFrame("fragmented control frame"));
                 }
-                let mut code = 1005;
-                let mut reason = String::new();
-                if payload.len() >= 2 {
-                    code = ((payload[0] as usize) << 8) + (payload[1] as usize);
-                    reason = String::from(
-                        std::str::from_utf8(&payload[2..]).map_err(
-                            |source| Error::Utf8 {
-                                source,
-                                context: "close reason",
-                            },
-                        )?,
-                    );
-                }
-                self.received_messages.lock().await.push(
-                    StreamMessage::Close {
-                        code,
-                        reason,
-                    },
-                );
+                self.receive_frame_close(payload).await?;
                 Ok(ReceivedCloseFrame::Yes)
             },
 
@@ -526,6 +487,59 @@ impl<'a> FrameReceiver<'a> {
         } else {
             MessageInProgress::Binary
         };
+        Ok(())
+    }
+
+    async fn receive_frame_close(
+        &mut self,
+        payload: Vec<u8>,
+    ) -> Result<(), Error> {
+        let mut code = 1005;
+        let mut reason = String::new();
+        if payload.len() >= 2 {
+            code = ((payload[0] as usize) << 8) + (payload[1] as usize);
+            reason = String::from(std::str::from_utf8(&payload[2..]).map_err(
+                |source| Error::Utf8 {
+                    source,
+                    context: "close reason",
+                },
+            )?);
+        }
+        self.received_messages.lock().await.push(StreamMessage::Close {
+            code,
+            reason,
+        });
+        Ok(())
+    }
+
+    async fn receive_frame_continuation(
+        &mut self,
+        payload: Vec<u8>,
+        fin: bool,
+    ) -> Result<(), Error> {
+        match self.message_in_progress {
+            MessageInProgress::None => {
+                Err(Error::BadFrame("unexpected continuation frame"))
+            },
+            MessageInProgress::Text => {
+                self.receive_frame_text(payload, fin).await
+            },
+            MessageInProgress::Binary => {
+                self.receive_frame_binary(payload, fin).await
+            },
+        }
+    }
+
+    async fn receive_frame_ping(
+        &mut self,
+        payload: Vec<u8>,
+    ) -> Result<(), Error> {
+        self.message_handler
+            .lock()
+            .await
+            .send_frame(SetFin::Yes, OPCODE_PONG, payload.clone())
+            .await?;
+        self.received_messages.lock().await.push(StreamMessage::Ping(payload));
         Ok(())
     }
 
