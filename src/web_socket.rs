@@ -510,9 +510,9 @@ async fn receive_frame(
         },
 
         OPCODE_PING => {
-            // TODO: Check to see if we should verify FIN is set.
-            // It doesn't make any sense for it to be clear, since a ping
-            // frame can never be fragmented.
+            if !fin {
+                return Err(Error::BadFrame("fragmented control frame"));
+            }
             message_handler
                 .lock()
                 .await
@@ -523,17 +523,17 @@ async fn receive_frame(
         },
 
         OPCODE_PONG => {
-            // TODO: Check to see if we should verify FIN is set.
-            // It doesn't make any sense for it to be clear, since a ping
-            // frame can never be fragmented.
+            if !fin {
+                return Err(Error::BadFrame("fragmented control frame"));
+            }
             received_messages.lock().await.push(StreamMessage::Pong(payload));
             Ok(ReceivedCloseFrame::No)
         },
 
         OPCODE_CLOSE => {
-            // TODO: Check to see if we should verify FIN is set.
-            // It doesn't make any sense for it to be clear, since a ping
-            // frame can never be fragmented.
+            if !fin {
+                return Err(Error::BadFrame("fragmented control frame"));
+            }
             let mut code = 1005;
             let mut reason = String::new();
             if payload.len() >= 2 {
@@ -990,17 +990,21 @@ impl Sink<SinkMessage> for WebSocket {
                 code,
                 reason,
             } => {
-                self.close_sent = true;
-                WorkerMessage::Send {
-                    set_fin: SetFin::Yes,
-                    opcode: OPCODE_CLOSE,
-                    data: {
-                        let mut data = Vec::new();
-                        data.push_word(code, 16);
-                        // TODO: Check to make sure reason isn't too long.
-                        data.extend(reason.as_bytes());
-                        data
-                    },
+                if reason.as_bytes().len() + 2 > MAX_CONTROL_FRAME_DATA_LENGTH {
+                    return Err(Error::FramePayloadTooLarge);
+                } else {
+                    self.close_sent = true;
+                    WorkerMessage::Send {
+                        set_fin: SetFin::Yes,
+                        opcode: OPCODE_CLOSE,
+                        data: {
+                            let mut data = Vec::new();
+                            data.push_word(code, 16);
+                            // TODO: Check to make sure reason isn't too long.
+                            data.extend(reason.as_bytes());
+                            data
+                        },
+                    }
                 }
             },
             SinkMessage::CloseNoStatus => {
@@ -2438,5 +2442,155 @@ mod tests {
                 reader,
             ))
         );
+    }
+
+    #[test]
+    fn close_frame_fin_clear() {
+        let (connection_tx, _connection_back_tx) = mock_connection::Tx::new();
+        let (connection_rx, connection_back_rx) = mock_connection::Rx::new();
+        let ws = WebSocket::new(
+            Box::new(connection_tx),
+            Box::new(connection_rx),
+            MaskDirection::Transmit,
+            Some(7),
+        );
+        let connection_back_rx = RefCell::new(connection_back_rx);
+        let reader = async {
+            ws.fold(false, |_, message| async {
+                match message {
+                    StreamMessage::Close {
+                        code,
+                        reason,
+                    } => {
+                        // Check that the code and reason are correct.
+                        assert_eq!(1002, code);
+                        assert_eq!("fragmented control frame", reason);
+
+                        // Now the we're done, we can close the connection.
+                        connection_back_rx.borrow_mut().close().await;
+                        true
+                    },
+
+                    _ => panic!("we got something that isn't a close!"),
+                }
+            })
+            .await
+        };
+        connection_back_rx
+            .borrow_mut()
+            .web_socket_input(&b"\x08\x03\x03\xe8bye"[..]);
+        assert_eq!(
+            Ok(true),
+            executor::block_on(timeout(
+                REASONABLE_FAST_OPERATION_TIMEOUT,
+                reader,
+            ))
+        );
+    }
+
+    #[test]
+    fn ping_frame_fin_clear() {
+        let (connection_tx, _connection_back_tx) = mock_connection::Tx::new();
+        let (connection_rx, connection_back_rx) = mock_connection::Rx::new();
+        let ws = WebSocket::new(
+            Box::new(connection_tx),
+            Box::new(connection_rx),
+            MaskDirection::Transmit,
+            Some(7),
+        );
+        let connection_back_rx = RefCell::new(connection_back_rx);
+        let reader = async {
+            ws.fold(false, |_, message| async {
+                match message {
+                    StreamMessage::Close {
+                        code,
+                        reason,
+                    } => {
+                        // Check that the code and reason are correct.
+                        assert_eq!(1002, code);
+                        assert_eq!("fragmented control frame", reason);
+
+                        // Now the we're done, we can close the connection.
+                        connection_back_rx.borrow_mut().close().await;
+                        true
+                    },
+
+                    _ => panic!("we got something that isn't a close!"),
+                }
+            })
+            .await
+        };
+        connection_back_rx.borrow_mut().web_socket_input(&b"\x09\x02hi"[..]);
+        assert_eq!(
+            Ok(true),
+            executor::block_on(timeout(
+                REASONABLE_FAST_OPERATION_TIMEOUT,
+                reader,
+            ))
+        );
+    }
+
+    #[test]
+    fn pong_frame_fin_clear() {
+        let (connection_tx, _connection_back_tx) = mock_connection::Tx::new();
+        let (connection_rx, connection_back_rx) = mock_connection::Rx::new();
+        let ws = WebSocket::new(
+            Box::new(connection_tx),
+            Box::new(connection_rx),
+            MaskDirection::Transmit,
+            Some(7),
+        );
+        let connection_back_rx = RefCell::new(connection_back_rx);
+        let reader = async {
+            ws.fold(false, |_, message| async {
+                match message {
+                    StreamMessage::Close {
+                        code,
+                        reason,
+                    } => {
+                        // Check that the code and reason are correct.
+                        assert_eq!(1002, code);
+                        assert_eq!("fragmented control frame", reason);
+
+                        // Now the we're done, we can close the connection.
+                        connection_back_rx.borrow_mut().close().await;
+                        true
+                    },
+
+                    _ => panic!("we got something that isn't a close!"),
+                }
+            })
+            .await
+        };
+        connection_back_rx.borrow_mut().web_socket_input(&b"\x0a\x02hi"[..]);
+        assert_eq!(
+            Ok(true),
+            executor::block_on(timeout(
+                REASONABLE_FAST_OPERATION_TIMEOUT,
+                reader,
+            ))
+        );
+    }
+
+    #[test]
+    fn send_close_reason_too_long() {
+        let (connection_tx, _connection_back_tx) = mock_connection::Tx::new();
+        let (connection_rx, _connection_back_rx) = mock_connection::Rx::new();
+        let mut ws = WebSocket::new(
+            Box::new(connection_tx),
+            Box::new(connection_rx),
+            MaskDirection::Receive,
+            None,
+        );
+        assert!(matches!(
+            executor::block_on(async {
+                ws.send(SinkMessage::Close {
+                    code: 1000,
+                    reason: "X".repeat(124),
+                })
+                .await
+            }),
+            Err(Error::FramePayloadTooLarge)
+        ));
     }
 }
