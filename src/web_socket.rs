@@ -1631,8 +1631,6 @@ mod tests {
         );
     }
 
-    // TODO: Refactor this test?
-    #[allow(clippy::too_many_lines)]
     #[test]
     fn initiate_close_status_returned() {
         let (connection_tx, connection_back_tx) = mock_connection::Tx::new();
@@ -1703,53 +1701,45 @@ mod tests {
             .await
         })
         .is_ok());
-        assert!(matches!(
-            executor::block_on(async {
+        executor::block_on(async {
+            assert!(matches!(
                 sink.send(SinkMessage::Text {
                     payload: "Yo Dawg, I heard you like...".into(),
                     last_fragment: LastFragment::Yes,
                 })
-                .await
-            }),
-            Err(Error::Closed)
-        ));
-        assert!(matches!(
-            executor::block_on(async {
+                .await,
+                Err(Error::Closed)
+            ));
+            assert!(matches!(
                 sink.send(SinkMessage::Binary {
                     payload: "Yo Dawg, I heard you like...".into(),
                     last_fragment: LastFragment::Yes,
                 })
-                .await
-            }),
-            Err(Error::Closed)
-        ));
-        assert!(matches!(
-            executor::block_on(async {
-                sink.send(SinkMessage::Ping(vec![])).await
-            }),
-            Err(Error::Closed)
-        ));
-        assert!(matches!(
-            executor::block_on(async {
+                .await,
+                Err(Error::Closed)
+            ));
+            assert!(matches!(
+                sink.send(SinkMessage::Ping(vec![])).await,
+                Err(Error::Closed)
+            ));
+            assert!(matches!(
                 sink.send(SinkMessage::Close {
                     code: 1000,
                     reason: "Goodbye AGAIN!".into(),
                 })
+                .await,
+                Err(Error::Closed)
+            ));
+            assert_eq!(
+                Ok(((), ())),
+                timeout(REASONABLE_FAST_OPERATION_TIMEOUT, async {
+                    futures::join!(reader, writer)
+                })
                 .await
-            }),
-            Err(Error::Closed)
-        ));
-        assert_eq!(
-            Ok(((), ())),
-            executor::block_on(timeout(
-                REASONABLE_FAST_OPERATION_TIMEOUT,
-                async { futures::join!(reader, writer) }
-            ))
-        );
+            );
+        });
     }
 
-    // TODO: Refactor this test?
-    #[allow(clippy::too_many_lines)]
     #[test]
     fn receive_close() {
         let (connection_tx, connection_back_tx) = mock_connection::Tx::new();
