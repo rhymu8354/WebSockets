@@ -1,3 +1,6 @@
+mod frame_receiver;
+mod frame_sender;
+
 use super::{
     ConnectionRx,
     ConnectionTx,
@@ -5,6 +8,8 @@ use super::{
     VecExt,
 };
 use async_mutex::Mutex;
+use frame_receiver::FrameReceiver;
+use frame_sender::FrameSender;
 use futures::{
     channel::{
         mpsc,
@@ -16,17 +21,11 @@ use futures::{
         TryStreamExt,
     },
     AsyncReadExt,
-    AsyncWriteExt,
     Future,
     FutureExt,
     Sink,
     SinkExt,
     Stream,
-};
-use rand::{
-    rngs::StdRng,
-    Rng,
-    SeedableRng,
 };
 use std::{
     collections::VecDeque,
@@ -79,7 +78,7 @@ pub enum MaskDirection {
 }
 
 #[derive(Clone, Copy)]
-enum SetFin {
+pub enum SetFin {
     Yes,
     No,
 }
@@ -118,7 +117,7 @@ pub enum SinkMessage {
     CloseNoStatus,
 }
 
-struct ReceivedMessages {
+pub struct ReceivedMessages {
     fused: bool,
     queue: VecDeque<StreamMessage>,
     waker: Option<Waker>,
@@ -182,129 +181,6 @@ fn close_code_and_reason_from_error(error: Error) -> (usize, String) {
     }
 }
 
-struct FrameSender {
-    close_sent: Option<oneshot::Sender<()>>,
-    connection_tx: Box<dyn ConnectionTx>,
-    mask_direction: MaskDirection,
-    rng: StdRng,
-}
-
-impl FrameSender {
-    fn new(
-        close_sent: oneshot::Sender<()>,
-        connection_tx: Box<dyn ConnectionTx>,
-        mask_direction: MaskDirection,
-    ) -> Self {
-        Self {
-            close_sent: Some(close_sent),
-            connection_tx,
-            mask_direction,
-            rng: StdRng::from_entropy(),
-        }
-    }
-
-    async fn send_frame(
-        &mut self,
-        set_fin: SetFin,
-        opcode: u8,
-        mut payload: Vec<u8>,
-    ) -> Result<(), Error> {
-        // Do not send anything after sending "CLOSE".
-        if self.close_sent.is_none() {
-            return Err(Error::Closed);
-        }
-
-        // Pessimistically (meaning we might allocate more than we need)
-        // allocate enough memory for the frame in one shot.
-        let num_payload_bytes = payload.len();
-        let mut frame = Vec::with_capacity(num_payload_bytes + 14);
-
-        // Construct the first byte: FIN flag and opcode.
-        frame.push(
-            match set_fin {
-                SetFin::Yes => FIN,
-                SetFin::No => 0,
-            } | opcode,
-        );
-
-        // Determine what to set for the MASK flag.
-        let mask = match self.mask_direction {
-            MaskDirection::Receive => 0,
-            MaskDirection::Transmit => MASK,
-        };
-
-        // Encode the payload length differently, depending on which range
-        // the length falls into: either 1, 2, or 8 bytes.  For the 2 and 8
-        // byte variants, the first byte is a special marker.  Also, the MASK
-        // flag is added to the first byte always.
-        match num_payload_bytes {
-            0..=125 => {
-                #[allow(clippy::cast_possible_truncation)]
-                frame.push(num_payload_bytes as u8 | mask);
-            },
-            126..=65535 => {
-                frame.push(126 | mask);
-                frame.push_word(num_payload_bytes, 16);
-            },
-            _ => {
-                frame.push(127 | mask);
-                frame.push_word(num_payload_bytes, 64);
-            },
-        }
-
-        // Add the payload.  If masking, we need to generate a random mask
-        // and XOR the payload with it.
-        if mask == 0 {
-            frame.append(&mut payload);
-        } else {
-            // Generate a random mask (4 bytes).
-            let mut masking_key = [0; 4];
-            self.rng.fill(&mut masking_key);
-
-            // Include the mask in the frame.
-            frame.extend(masking_key.iter());
-
-            // Apply the mask while adding the payload; the mask byte to use
-            // rotates around (0, 1, 2, 3, 0, 1, 2, 3, 0, ...).
-            // The mask is applied by computing XOR (bit-wise exclusive-or)
-            // one mask byte for every payload byte.
-            for (i, byte) in payload.iter().enumerate() {
-                frame.push(byte ^ masking_key[i % 4]);
-            }
-        }
-
-        // Push the frame out to the underlying connection.  Note that this
-        // may yield until the connection is able to receive all the bytes.
-        //
-        // If any error occurs, consider the connection to be broken.
-        let written = self.connection_tx.write_all(&frame).await;
-        if opcode == OPCODE_CLOSE || written.is_err() {
-            let _ = self
-                .close_sent
-                .take()
-                .expect("should not send CLOSE twice")
-                .send(());
-        }
-        written.map_err(Error::ConnectionBroken)
-    }
-
-    async fn send_close(
-        &mut self,
-        code: usize,
-        reason: String,
-    ) {
-        let payload = if code == 1005 {
-            vec![]
-        } else {
-            let mut payload = Vec::new();
-            payload.push_word(code, 16);
-            payload.extend(reason.as_bytes());
-            payload
-        };
-        let _ = self.send_frame(SetFin::Yes, OPCODE_CLOSE, payload).await;
-    }
-}
-
 async fn receive_bytes(
     connection_rx: &mut dyn ConnectionRx,
     frame_reassembly_buffer: &mut Vec<u8>,
@@ -324,231 +200,9 @@ async fn receive_bytes(
     Ok(())
 }
 
-enum ReceivedCloseFrame {
+pub enum ReceivedCloseFrame {
     Yes,
     No,
-}
-
-struct FrameReceiver<'a> {
-    mask_direction: MaskDirection,
-    frame_sender: &'a Mutex<FrameSender>,
-    message_reassembly_buffer: Vec<u8>,
-    message_in_progress: MessageInProgress,
-    received_messages: &'a Mutex<ReceivedMessages>,
-}
-
-impl<'a> FrameReceiver<'a> {
-    fn new(
-        mask_direction: MaskDirection,
-        frame_sender: &'a Mutex<FrameSender>,
-        received_messages: &'a Mutex<ReceivedMessages>,
-    ) -> Self {
-        Self {
-            mask_direction,
-            frame_sender,
-            message_in_progress: MessageInProgress::None,
-            message_reassembly_buffer: Vec::new(),
-            received_messages,
-        }
-    }
-
-    async fn receive_frame(
-        &mut self,
-        frame_reassembly_buffer: &[u8],
-        header_length: usize,
-        payload_length: usize,
-    ) -> Result<ReceivedCloseFrame, Error> {
-        // Decode the FIN flag.
-        let fin = (frame_reassembly_buffer[0] & FIN) != 0;
-
-        // Decode the reserved bits, and reject the frame if any are set.
-        let reserved_bits = (frame_reassembly_buffer[0] >> 4) & 0x07;
-        if reserved_bits != 0 {
-            return Err(Error::BadFrame("reserved bits set"));
-        }
-
-        // Decode the MASK flag.
-        let mask = (frame_reassembly_buffer[1] & MASK) != 0;
-
-        // Verify the MASK flag is correct.  If we are supposed to have data
-        // masked in the receive direction, MASK should be set.  Otherwise,
-        // it should be clear.
-        match (mask, self.mask_direction) {
-            (true, MaskDirection::Transmit) => {
-                return Err(Error::BadFrame("masked frame"));
-            },
-            (false, MaskDirection::Receive) => {
-                return Err(Error::BadFrame("unmasked frame"));
-            },
-            _ => (),
-        }
-
-        // Decode the opcode.  This determines:
-        // * If this is a continuation of a fragmented message, or the first
-        //   (and perhaps only) fragment of a new message.
-        // * The type of message.
-        let opcode = frame_reassembly_buffer[0] & 0x0F;
-
-        // Recover the payload from the frame, applying the mask if necessary.
-        let mut payload = frame_reassembly_buffer
-            [header_length..header_length + payload_length]
-            .to_vec();
-        if mask {
-            let mask_bytes =
-                &frame_reassembly_buffer[header_length - 4..header_length];
-            payload.iter_mut().zip(mask_bytes.iter().cycle()).for_each(
-                |(payload_byte, mask_byte)| *payload_byte ^= mask_byte,
-            );
-        }
-
-        // Interpret the payload depending on the opcode.
-        match opcode {
-            OPCODE_CONTINUATION => {
-                self.receive_frame_continuation(payload, fin).await?;
-                Ok(ReceivedCloseFrame::No)
-            },
-
-            OPCODE_TEXT => {
-                if let MessageInProgress::None = self.message_in_progress {
-                    self.receive_frame_text(payload, fin).await?;
-                } else {
-                    return Err(Error::BadFrame("last message incomplete"));
-                }
-                Ok(ReceivedCloseFrame::No)
-            },
-
-            OPCODE_BINARY => {
-                if let MessageInProgress::None = self.message_in_progress {
-                    self.receive_frame_binary(payload, fin).await?
-                } else {
-                    return Err(Error::BadFrame("last message incomplete"));
-                }
-                Ok(ReceivedCloseFrame::No)
-            },
-
-            OPCODE_PING => {
-                if !fin {
-                    return Err(Error::BadFrame("fragmented control frame"));
-                }
-                self.receive_frame_ping(payload).await?;
-                Ok(ReceivedCloseFrame::No)
-            },
-
-            OPCODE_PONG => {
-                if !fin {
-                    return Err(Error::BadFrame("fragmented control frame"));
-                }
-                self.received_messages
-                    .lock()
-                    .await
-                    .push(StreamMessage::Pong(payload));
-                Ok(ReceivedCloseFrame::No)
-            },
-
-            OPCODE_CLOSE => {
-                if !fin {
-                    return Err(Error::BadFrame("fragmented control frame"));
-                }
-                self.receive_frame_close(payload).await?;
-                Ok(ReceivedCloseFrame::Yes)
-            },
-
-            _ => Err(Error::BadFrame("unknown opcode")),
-        }
-    }
-
-    async fn receive_frame_binary(
-        &mut self,
-        mut payload: Vec<u8>,
-        fin: bool,
-    ) -> Result<(), Error> {
-        self.message_reassembly_buffer.append(&mut payload);
-        self.message_in_progress = if fin {
-            let mut message = Vec::new();
-            std::mem::swap(&mut message, &mut self.message_reassembly_buffer);
-            let mut received_messages = self.received_messages.lock().await;
-            received_messages.push(StreamMessage::Binary(message));
-            MessageInProgress::None
-        } else {
-            MessageInProgress::Binary
-        };
-        Ok(())
-    }
-
-    async fn receive_frame_close(
-        &mut self,
-        payload: Vec<u8>,
-    ) -> Result<(), Error> {
-        let mut code = 1005;
-        let mut reason = String::new();
-        if payload.len() >= 2 {
-            code = ((payload[0] as usize) << 8) + (payload[1] as usize);
-            reason = String::from(std::str::from_utf8(&payload[2..]).map_err(
-                |source| Error::Utf8 {
-                    source,
-                    context: "close reason",
-                },
-            )?);
-        }
-        self.received_messages.lock().await.push(StreamMessage::Close {
-            code,
-            reason,
-        });
-        Ok(())
-    }
-
-    async fn receive_frame_continuation(
-        &mut self,
-        payload: Vec<u8>,
-        fin: bool,
-    ) -> Result<(), Error> {
-        match self.message_in_progress {
-            MessageInProgress::None => {
-                Err(Error::BadFrame("unexpected continuation frame"))
-            },
-            MessageInProgress::Text => {
-                self.receive_frame_text(payload, fin).await
-            },
-            MessageInProgress::Binary => {
-                self.receive_frame_binary(payload, fin).await
-            },
-        }
-    }
-
-    async fn receive_frame_ping(
-        &mut self,
-        payload: Vec<u8>,
-    ) -> Result<(), Error> {
-        self.frame_sender
-            .lock()
-            .await
-            .send_frame(SetFin::Yes, OPCODE_PONG, payload.clone())
-            .await?;
-        self.received_messages.lock().await.push(StreamMessage::Ping(payload));
-        Ok(())
-    }
-
-    async fn receive_frame_text(
-        &mut self,
-        mut payload: Vec<u8>,
-        fin: bool,
-    ) -> Result<(), Error> {
-        self.message_reassembly_buffer.append(&mut payload);
-        self.message_in_progress = if fin {
-            let message = std::str::from_utf8(&self.message_reassembly_buffer)
-                .map_err(|source| Error::Utf8 {
-                    source,
-                    context: "text message",
-                })?;
-            let mut received_messages = self.received_messages.lock().await;
-            received_messages.push(StreamMessage::Text(String::from(message)));
-            self.message_reassembly_buffer.clear();
-            MessageInProgress::None
-        } else {
-            MessageInProgress::Text
-        };
-        Ok(())
-    }
 }
 
 fn decode_frame_header_payload_lengths(frame: &[u8]) -> Option<(usize, usize)> {
@@ -778,89 +432,6 @@ pub struct WebSocket {
 }
 
 impl WebSocket {
-    pub fn close<T>(
-        &mut self,
-        code: usize,
-        reason: T,
-    ) -> Result<(), Error>
-    where
-        T: Into<String>,
-    {
-        executor::block_on(async {
-            self.send(SinkMessage::Close {
-                code,
-                reason: reason.into(),
-            })
-            .await
-        })
-    }
-
-    pub(crate) fn new(
-        connection_tx: Box<dyn ConnectionTx>,
-        connection_rx: Box<dyn ConnectionRx>,
-        mask_direction: MaskDirection,
-        max_frame_size: Option<usize>,
-    ) -> Self {
-        // Make the channel used to communicate with the worker thread.
-        let (sender, receiver) = mpsc::unbounded();
-
-        // Make storage for a queue with waker used to deliver received
-        // messages back to the user.
-        let received_messages = Arc::new(Mutex::new(ReceivedMessages {
-            fused: false,
-            queue: VecDeque::new(),
-            waker: None,
-        }));
-
-        // Store the sender end of the channel and spawn the worker thread,
-        // giving it the receiver end as well as the connection.
-        Self {
-            close_sent: false,
-            message_in_progress: MessageInProgress::None,
-            received_messages: received_messages.clone(),
-            work_in: sender,
-            worker: Some(thread::spawn(move || {
-                executor::block_on(worker(
-                    receiver,
-                    received_messages,
-                    connection_tx,
-                    connection_rx,
-                    mask_direction,
-                    max_frame_size,
-                ))
-            })),
-        }
-    }
-
-    pub fn ping<T>(
-        &mut self,
-        data: T,
-    ) -> Result<(), Error>
-    where
-        T: Into<Vec<u8>>,
-    {
-        executor::block_on(async {
-            self.send(SinkMessage::Ping(data.into())).await
-        })
-    }
-
-    pub fn text<T>(
-        &mut self,
-        data: T,
-        last_fragment: LastFragment,
-    ) -> Result<(), Error>
-    where
-        T: Into<String>,
-    {
-        executor::block_on(async {
-            self.send(SinkMessage::Text {
-                payload: data.into(),
-                last_fragment,
-            })
-            .await
-        })
-    }
-
     pub fn binary<T>(
         &mut self,
         data: T,
@@ -914,6 +485,23 @@ impl WebSocket {
         })
     }
 
+    pub fn close<T>(
+        &mut self,
+        code: usize,
+        reason: T,
+    ) -> Result<(), Error>
+    where
+        T: Into<String>,
+    {
+        executor::block_on(async {
+            self.send(SinkMessage::Close {
+                code,
+                reason: reason.into(),
+            })
+            .await
+        })
+    }
+
     fn close_message_with_status(
         &mut self,
         code: usize,
@@ -945,6 +533,55 @@ impl WebSocket {
         }
     }
 
+    pub(crate) fn new(
+        connection_tx: Box<dyn ConnectionTx>,
+        connection_rx: Box<dyn ConnectionRx>,
+        mask_direction: MaskDirection,
+        max_frame_size: Option<usize>,
+    ) -> Self {
+        // Make the channel used to communicate with the worker thread.
+        let (sender, receiver) = mpsc::unbounded();
+
+        // Make storage for a queue with waker used to deliver received
+        // messages back to the user.
+        let received_messages = Arc::new(Mutex::new(ReceivedMessages {
+            fused: false,
+            queue: VecDeque::new(),
+            waker: None,
+        }));
+
+        // Store the sender end of the channel and spawn the worker thread,
+        // giving it the receiver end as well as the connection.
+        Self {
+            close_sent: false,
+            message_in_progress: MessageInProgress::None,
+            received_messages: received_messages.clone(),
+            work_in: sender,
+            worker: Some(thread::spawn(move || {
+                executor::block_on(worker(
+                    receiver,
+                    received_messages,
+                    connection_tx,
+                    connection_rx,
+                    mask_direction,
+                    max_frame_size,
+                ))
+            })),
+        }
+    }
+
+    pub fn ping<T>(
+        &mut self,
+        data: T,
+    ) -> Result<(), Error>
+    where
+        T: Into<Vec<u8>>,
+    {
+        executor::block_on(async {
+            self.send(SinkMessage::Ping(data.into())).await
+        })
+    }
+
     fn ping_message(payload: Vec<u8>) -> Result<WorkerMessage, Error> {
         if payload.len() > MAX_CONTROL_FRAME_DATA_LENGTH {
             Err(Error::FramePayloadTooLarge)
@@ -955,6 +592,23 @@ impl WebSocket {
                 data: payload,
             })
         }
+    }
+
+    pub fn text<T>(
+        &mut self,
+        data: T,
+        last_fragment: LastFragment,
+    ) -> Result<(), Error>
+    where
+        T: Into<String>,
+    {
+        executor::block_on(async {
+            self.send(SinkMessage::Text {
+                payload: data.into(),
+                last_fragment,
+            })
+            .await
+        })
     }
 
     fn text_message<T>(
