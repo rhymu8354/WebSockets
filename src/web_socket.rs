@@ -62,11 +62,15 @@ const OPCODE_CLOSE: u8 = 0x08;
 // This is the opcode for a ping frame.
 const OPCODE_PING: u8 = 0x09;
 
-/// This is the opcode for a pong frame.
+// This is the opcode for a pong frame.
 const OPCODE_PONG: u8 = 0x0A;
 
 // This is the maximum length of a control frame payload.
 const MAX_CONTROL_FRAME_DATA_LENGTH: usize = 125;
+
+// This is the initial number of bytes to attempt to read from the
+// underlying connection for a WebSocket when accepting a new frame.
+const INITIAL_READ_CHUNK_SIZE: usize = 65536;
 
 #[derive(Clone, Copy)]
 pub enum MaskDirection {
@@ -319,13 +323,10 @@ impl MessageHandler {
 async fn receive_bytes(
     connection_rx: &mut dyn ConnectionRx,
     frame_reassembly_buffer: &mut Vec<u8>,
+    read_chunk_size: usize,
 ) -> Result<(), Error> {
-    // TODO: We have a magic number here as a guess of how much more
-    // memory we will need to hold the next frame.  We can do better
-    // than that, perhaps by making it configurable, and/or adapting
-    // at run-time based on how far off our previous estimates were.
     let left_over = frame_reassembly_buffer.len();
-    frame_reassembly_buffer.resize(left_over + 65536, 0);
+    frame_reassembly_buffer.resize(left_over + read_chunk_size, 0);
     let received = connection_rx
         .read(&mut frame_reassembly_buffer[left_over..])
         .await
@@ -571,11 +572,20 @@ async fn try_receive_frames(
     let mut message_reassembly_buffer = Vec::new();
     let mut message_in_progress = MessageInProgress::None;
     let mut need_more_input = true;
+    let mut read_chunk_size = INITIAL_READ_CHUNK_SIZE;
     loop {
         // Wait for more data to arrive, if we need more input.
         if need_more_input {
-            receive_bytes(&mut connection_rx, &mut frame_reassembly_buffer)
-                .await?;
+            receive_bytes(
+                &mut connection_rx,
+                &mut frame_reassembly_buffer,
+                read_chunk_size,
+            )
+            .await?;
+
+            // If we need more data, double the amount of free space to arrange
+            // in the frame reassembly buffer for receiving more data.
+            read_chunk_size *= 2;
         }
 
         // Until we recover a whole frame, assume we need to read more data.
@@ -661,8 +671,11 @@ async fn try_receive_frames(
             frame_reassembly_buffer.drain(0..frame_length);
 
             // Try to recover more frames from what we already received,
-            // before reading more.
+            // before reading more.  Once we need to read more, start over
+            // in the estimate of how many bytes need to be arranged
+            // in the frame reassembly buffer.
             need_more_input = false;
+            read_chunk_size = INITIAL_READ_CHUNK_SIZE;
         } else if let Some(max_frame_size) = max_frame_size {
             if frame_reassembly_buffer.len() >= max_frame_size {
                 return Err(Error::FramePayloadTooLarge);
@@ -1000,7 +1013,6 @@ impl Sink<SinkMessage> for WebSocket {
                         data: {
                             let mut data = Vec::new();
                             data.push_word(code, 16);
-                            // TODO: Check to make sure reason isn't too long.
                             data.extend(reason.as_bytes());
                             data
                         },
