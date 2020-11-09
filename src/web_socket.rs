@@ -72,32 +72,27 @@ const MAX_CONTROL_FRAME_DATA_LENGTH: usize = 125;
 const INITIAL_READ_CHUNK_SIZE: usize = 65536;
 
 #[derive(Clone, Copy)]
+pub enum LastFragment {
+    Yes,
+    No,
+}
+
+#[derive(Clone, Copy)]
 pub enum MaskDirection {
     Transmit,
     Receive,
+}
+
+enum MessageInProgress {
+    None,
+    Text,
+    Binary,
 }
 
 #[derive(Clone, Copy)]
 pub enum SetFin {
     Yes,
     No,
-}
-
-#[derive(Clone, Copy)]
-pub enum LastFragment {
-    Yes,
-    No,
-}
-
-pub enum StreamMessage {
-    Ping(Vec<u8>),
-    Pong(Vec<u8>),
-    Text(String),
-    Binary(Vec<u8>),
-    Close {
-        code: usize,
-        reason: String,
-    },
 }
 
 pub enum SinkMessage {
@@ -115,6 +110,22 @@ pub enum SinkMessage {
         reason: String,
     },
     CloseNoStatus,
+}
+
+pub enum StreamMessage {
+    Ping(Vec<u8>),
+    Pong(Vec<u8>),
+    Text(String),
+    Binary(Vec<u8>),
+    Close {
+        code: usize,
+        reason: String,
+    },
+}
+
+pub enum ReceivedCloseFrame {
+    Yes,
+    No,
 }
 
 pub struct ReceivedMessages {
@@ -142,12 +153,6 @@ impl ReceivedMessages {
             waker.wake();
         }
     }
-}
-
-enum MessageInProgress {
-    None,
-    Text,
-    Binary,
 }
 
 enum WorkerMessage {
@@ -179,30 +184,6 @@ fn close_code_and_reason_from_error(error: Error) -> (usize, String) {
         },
         _ => (1005, String::new()),
     }
-}
-
-async fn receive_bytes(
-    connection_rx: &mut dyn ConnectionRx,
-    frame_reassembly_buffer: &mut Vec<u8>,
-    read_chunk_size: usize,
-) -> Result<(), Error> {
-    let left_over = frame_reassembly_buffer.len();
-    frame_reassembly_buffer.resize(left_over + read_chunk_size, 0);
-    let received = connection_rx
-        .read(&mut frame_reassembly_buffer[left_over..])
-        .await
-        .map_err(Error::ConnectionBroken)
-        .and_then(|received| match received {
-            0 => Err(Error::ConnectionClosed),
-            received => Ok(received),
-        })?;
-    frame_reassembly_buffer.truncate(left_over + received);
-    Ok(())
-}
-
-pub enum ReceivedCloseFrame {
-    Yes,
-    No,
 }
 
 fn decode_frame_header_payload_lengths(frame: &[u8]) -> Option<(usize, usize)> {
@@ -239,6 +220,85 @@ fn decode_frame_header_payload_lengths(frame: &[u8]) -> Option<(usize, usize)> {
             Some((header_length, payload_length))
         },
     }
+}
+
+async fn handle_message(
+    message: WorkerMessage,
+    frame_sender: &Mutex<FrameSender>,
+) -> Result<(), ()> {
+    match message {
+        WorkerMessage::Exit => Err(()),
+
+        WorkerMessage::Send {
+            set_fin,
+            opcode,
+            data,
+        } => frame_sender
+            .lock()
+            .await
+            .send_frame(set_fin, opcode, data)
+            .await
+            .map_err(|_| ()),
+    }
+}
+
+async fn handle_messages(
+    work_in_receiver: mpsc::UnboundedReceiver<WorkerMessage>,
+    frame_sender: &Mutex<FrameSender>,
+) {
+    let _ = work_in_receiver
+        .map(Ok)
+        .try_for_each(|message| async {
+            handle_message(message, frame_sender).await
+        })
+        .await;
+}
+
+async fn receive_bytes(
+    connection_rx: &mut dyn ConnectionRx,
+    frame_reassembly_buffer: &mut Vec<u8>,
+    read_chunk_size: usize,
+) -> Result<(), Error> {
+    let left_over = frame_reassembly_buffer.len();
+    frame_reassembly_buffer.resize(left_over + read_chunk_size, 0);
+    let received = connection_rx
+        .read(&mut frame_reassembly_buffer[left_over..])
+        .await
+        .map_err(Error::ConnectionBroken)
+        .and_then(|received| match received {
+            0 => Err(Error::ConnectionClosed),
+            received => Ok(received),
+        })?;
+    frame_reassembly_buffer.truncate(left_over + received);
+    Ok(())
+}
+
+async fn receive_frames(
+    connection_rx: Box<dyn ConnectionRx>,
+    received_messages: Arc<Mutex<ReceivedMessages>>,
+    max_frame_size: Option<usize>,
+    mask_direction: MaskDirection,
+    frame_sender: &Mutex<FrameSender>,
+    close_sent: oneshot::Receiver<()>,
+) {
+    if let Err(error) = try_receive_frames(
+        connection_rx,
+        &*received_messages,
+        max_frame_size,
+        mask_direction,
+        frame_sender,
+        close_sent,
+    )
+    .await
+    {
+        let (code, reason) = close_code_and_reason_from_error(error);
+        received_messages.lock().await.push(StreamMessage::Close {
+            code,
+            reason: reason.clone(),
+        });
+        frame_sender.lock().await.send_close(code, reason).await;
+    }
+    received_messages.lock().await.fuse();
 }
 
 async fn try_receive_frames(
@@ -322,66 +382,6 @@ async fn try_receive_frames(
             }
         }
     }
-}
-
-async fn receive_frames(
-    connection_rx: Box<dyn ConnectionRx>,
-    received_messages: Arc<Mutex<ReceivedMessages>>,
-    max_frame_size: Option<usize>,
-    mask_direction: MaskDirection,
-    frame_sender: &Mutex<FrameSender>,
-    close_sent: oneshot::Receiver<()>,
-) {
-    if let Err(error) = try_receive_frames(
-        connection_rx,
-        &*received_messages,
-        max_frame_size,
-        mask_direction,
-        frame_sender,
-        close_sent,
-    )
-    .await
-    {
-        let (code, reason) = close_code_and_reason_from_error(error);
-        received_messages.lock().await.push(StreamMessage::Close {
-            code,
-            reason: reason.clone(),
-        });
-        frame_sender.lock().await.send_close(code, reason).await;
-    }
-    received_messages.lock().await.fuse();
-}
-
-async fn handle_message(
-    message: WorkerMessage,
-    frame_sender: &Mutex<FrameSender>,
-) -> Result<(), ()> {
-    match message {
-        WorkerMessage::Exit => Err(()),
-
-        WorkerMessage::Send {
-            set_fin,
-            opcode,
-            data,
-        } => frame_sender
-            .lock()
-            .await
-            .send_frame(set_fin, opcode, data)
-            .await
-            .map_err(|_| ()),
-    }
-}
-
-async fn handle_messages(
-    work_in_receiver: mpsc::UnboundedReceiver<WorkerMessage>,
-    frame_sender: &Mutex<FrameSender>,
-) {
-    let _ = work_in_receiver
-        .map(Ok)
-        .try_for_each(|message| async {
-            handle_message(message, frame_sender).await
-        })
-        .await;
 }
 
 // The use of `futures::select!` seems to trigger this warning somehow
