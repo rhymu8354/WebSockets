@@ -182,14 +182,14 @@ fn close_code_and_reason_from_error(error: Error) -> (usize, String) {
     }
 }
 
-struct MessageHandler {
+struct FrameSender {
     close_sent: Option<oneshot::Sender<()>>,
     connection_tx: Box<dyn ConnectionTx>,
     mask_direction: MaskDirection,
     rng: StdRng,
 }
 
-impl MessageHandler {
+impl FrameSender {
     fn new(
         close_sent: oneshot::Sender<()>,
         connection_tx: Box<dyn ConnectionTx>,
@@ -200,21 +200,6 @@ impl MessageHandler {
             connection_tx,
             mask_direction,
             rng: StdRng::from_entropy(),
-        }
-    }
-
-    async fn handle_message(
-        &mut self,
-        message: WorkerMessage,
-    ) -> Result<(), ()> {
-        match message {
-            WorkerMessage::Exit => Err(()),
-
-            WorkerMessage::Send {
-                set_fin,
-                opcode,
-                data,
-            } => self.send_frame(set_fin, opcode, data).await.map_err(|_| ()),
         }
     }
 
@@ -346,7 +331,7 @@ enum ReceivedCloseFrame {
 
 struct FrameReceiver<'a> {
     mask_direction: MaskDirection,
-    message_handler: &'a Mutex<MessageHandler>,
+    frame_sender: &'a Mutex<FrameSender>,
     message_reassembly_buffer: Vec<u8>,
     message_in_progress: MessageInProgress,
     received_messages: &'a Mutex<ReceivedMessages>,
@@ -355,12 +340,12 @@ struct FrameReceiver<'a> {
 impl<'a> FrameReceiver<'a> {
     fn new(
         mask_direction: MaskDirection,
-        message_handler: &'a Mutex<MessageHandler>,
+        frame_sender: &'a Mutex<FrameSender>,
         received_messages: &'a Mutex<ReceivedMessages>,
     ) -> Self {
         Self {
             mask_direction,
-            message_handler,
+            frame_sender,
             message_in_progress: MessageInProgress::None,
             message_reassembly_buffer: Vec::new(),
             received_messages,
@@ -534,7 +519,7 @@ impl<'a> FrameReceiver<'a> {
         &mut self,
         payload: Vec<u8>,
     ) -> Result<(), Error> {
-        self.message_handler
+        self.frame_sender
             .lock()
             .await
             .send_frame(SetFin::Yes, OPCODE_PONG, payload.clone())
@@ -607,11 +592,11 @@ async fn try_receive_frames(
     received_messages: &Mutex<ReceivedMessages>,
     max_frame_size: Option<usize>,
     mask_direction: MaskDirection,
-    message_handler: &Mutex<MessageHandler>,
+    frame_sender: &Mutex<FrameSender>,
     close_sent: oneshot::Receiver<()>,
 ) -> Result<(), Error> {
     let mut frame_receiver =
-        FrameReceiver::new(mask_direction, message_handler, received_messages);
+        FrameReceiver::new(mask_direction, frame_sender, received_messages);
     let mut frame_reassembly_buffer = Vec::new();
     let mut need_more_input = true;
     let mut read_chunk_size = INITIAL_READ_CHUNK_SIZE;
@@ -690,7 +675,7 @@ async fn receive_frames(
     received_messages: Arc<Mutex<ReceivedMessages>>,
     max_frame_size: Option<usize>,
     mask_direction: MaskDirection,
-    message_handler: &Mutex<MessageHandler>,
+    frame_sender: &Mutex<FrameSender>,
     close_sent: oneshot::Receiver<()>,
 ) {
     if let Err(error) = try_receive_frames(
@@ -698,7 +683,7 @@ async fn receive_frames(
         &*received_messages,
         max_frame_size,
         mask_direction,
-        message_handler,
+        frame_sender,
         close_sent,
     )
     .await
@@ -708,19 +693,39 @@ async fn receive_frames(
             code,
             reason: reason.clone(),
         });
-        message_handler.lock().await.send_close(code, reason).await;
+        frame_sender.lock().await.send_close(code, reason).await;
     }
     received_messages.lock().await.fuse();
 }
 
+async fn handle_message(
+    message: WorkerMessage,
+    frame_sender: &Mutex<FrameSender>,
+) -> Result<(), ()> {
+    match message {
+        WorkerMessage::Exit => Err(()),
+
+        WorkerMessage::Send {
+            set_fin,
+            opcode,
+            data,
+        } => frame_sender
+            .lock()
+            .await
+            .send_frame(set_fin, opcode, data)
+            .await
+            .map_err(|_| ()),
+    }
+}
+
 async fn handle_messages(
     work_in_receiver: mpsc::UnboundedReceiver<WorkerMessage>,
-    message_handler: &Mutex<MessageHandler>,
+    frame_sender: &Mutex<FrameSender>,
 ) {
     let _ = work_in_receiver
         .map(Ok)
         .try_for_each(|message| async {
-            message_handler.lock().await.handle_message(message).await
+            handle_message(message, frame_sender).await
         })
         .await;
 }
@@ -738,19 +743,19 @@ async fn worker(
 ) {
     // Drive to completion the stream of messages to the worker thread.
     let (close_sent_sender, close_sent_receiver) = oneshot::channel();
-    let message_handler = Mutex::new(MessageHandler::new(
+    let frame_sender = Mutex::new(FrameSender::new(
         close_sent_sender,
         connection_tx,
         mask_direction,
     ));
     let handle_messages_future =
-        handle_messages(work_in_receiver, &message_handler);
+        handle_messages(work_in_receiver, &frame_sender);
     let receive_frames_future = receive_frames(
         connection_rx,
         received_messages,
         max_frame_size,
         mask_direction,
-        &message_handler,
+        &frame_sender,
         close_sent_receiver,
     );
     futures::select!(
