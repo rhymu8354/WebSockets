@@ -1071,8 +1071,10 @@ impl Drop for WebSocket {
 #[allow(clippy::non_ascii_literal)]
 mod tests {
     use super::*;
-    use crate::mock_connection;
-    use async_std::future::timeout;
+    use crate::{
+        mock_connection,
+        timeout::timeout,
+    };
     use std::cell::RefCell;
 
     const REASONABLE_FAST_OPERATION_TIMEOUT: std::time::Duration =

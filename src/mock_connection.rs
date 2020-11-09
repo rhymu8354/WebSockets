@@ -1,7 +1,7 @@
 #![cfg(test)]
 
+use super::timeout::timeout;
 use async_mutex::Mutex;
-use async_std::future::timeout;
 use futures::{
     channel::mpsc,
     executor,
