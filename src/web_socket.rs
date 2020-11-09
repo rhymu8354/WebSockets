@@ -872,6 +872,121 @@ impl WebSocket {
             .await
         })
     }
+
+    fn binary_message<T>(
+        &mut self,
+        last_fragment: LastFragment,
+        payload: T,
+    ) -> Result<WorkerMessage, Error>
+    where
+        T: Into<Vec<u8>>,
+    {
+        let (opcode, set_fin) = match (&self.message_in_progress, last_fragment)
+        {
+            (MessageInProgress::Text, _) => Err(Error::LastMessageUnfinished),
+            (MessageInProgress::None, LastFragment::Yes) => {
+                Ok((OPCODE_BINARY, SetFin::Yes))
+            },
+            (MessageInProgress::None, LastFragment::No) => {
+                Ok((OPCODE_BINARY, SetFin::No))
+            },
+            (MessageInProgress::Binary, LastFragment::Yes) => {
+                Ok((OPCODE_CONTINUATION, SetFin::Yes))
+            },
+            (MessageInProgress::Binary, LastFragment::No) => {
+                Ok((OPCODE_CONTINUATION, SetFin::No))
+            },
+        }?;
+        self.message_in_progress = if let LastFragment::No = last_fragment {
+            MessageInProgress::Binary
+        } else {
+            MessageInProgress::None
+        };
+        Ok(WorkerMessage::Send {
+            set_fin,
+            opcode,
+            data: payload.into(),
+        })
+    }
+
+    fn close_message_with_status(
+        &mut self,
+        code: usize,
+        reason: &[u8],
+    ) -> Result<WorkerMessage, Error> {
+        if reason.len() + 2 > MAX_CONTROL_FRAME_DATA_LENGTH {
+            Err(Error::FramePayloadTooLarge)
+        } else {
+            self.close_sent = true;
+            Ok(WorkerMessage::Send {
+                set_fin: SetFin::Yes,
+                opcode: OPCODE_CLOSE,
+                data: {
+                    let mut data = Vec::new();
+                    data.push_word(code, 16);
+                    data.extend(reason);
+                    data
+                },
+            })
+        }
+    }
+
+    fn close_message_without_status(&mut self) -> WorkerMessage {
+        self.close_sent = true;
+        WorkerMessage::Send {
+            set_fin: SetFin::Yes,
+            opcode: OPCODE_CLOSE,
+            data: vec![],
+        }
+    }
+
+    fn ping_message(payload: Vec<u8>) -> Result<WorkerMessage, Error> {
+        if payload.len() > MAX_CONTROL_FRAME_DATA_LENGTH {
+            Err(Error::FramePayloadTooLarge)
+        } else {
+            Ok(WorkerMessage::Send {
+                set_fin: SetFin::Yes,
+                opcode: OPCODE_PING,
+                data: payload,
+            })
+        }
+    }
+
+    fn text_message<T>(
+        &mut self,
+        last_fragment: LastFragment,
+        payload: T,
+    ) -> Result<WorkerMessage, Error>
+    where
+        T: Into<Vec<u8>>,
+    {
+        let (opcode, set_fin) = match (&self.message_in_progress, last_fragment)
+        {
+            (MessageInProgress::Binary, _) => Err(Error::LastMessageUnfinished),
+            (MessageInProgress::None, LastFragment::Yes) => {
+                Ok((OPCODE_TEXT, SetFin::Yes))
+            },
+            (MessageInProgress::None, LastFragment::No) => {
+                Ok((OPCODE_TEXT, SetFin::No))
+            },
+            (MessageInProgress::Text, LastFragment::Yes) => {
+                Ok((OPCODE_CONTINUATION, SetFin::Yes))
+            },
+            (MessageInProgress::Text, LastFragment::No) => {
+                Ok((OPCODE_CONTINUATION, SetFin::No))
+            },
+        }?;
+        self.message_in_progress = if let LastFragment::No = last_fragment {
+            MessageInProgress::Text
+        } else {
+            MessageInProgress::None
+        };
+        Ok(WorkerMessage::Send {
+            set_fin,
+            opcode,
+            data: payload.into(),
+        })
+    }
 }
 
 impl Stream for WebSocket {
@@ -911,8 +1026,6 @@ impl Sink<SinkMessage> for WebSocket {
         self.work_in.poll_ready(cx).map_err(|_| Error::Closed)
     }
 
-    // TODO: Needs refactoring
-    #[allow(clippy::too_many_lines)]
     fn start_send(
         mut self: std::pin::Pin<&mut Self>,
         item: SinkMessage,
@@ -921,113 +1034,20 @@ impl Sink<SinkMessage> for WebSocket {
             return Err(Error::Closed);
         }
         let item = match item {
-            SinkMessage::Ping(payload) => {
-                if payload.len() > MAX_CONTROL_FRAME_DATA_LENGTH {
-                    return Err(Error::FramePayloadTooLarge);
-                } else {
-                    WorkerMessage::Send {
-                        set_fin: SetFin::Yes,
-                        opcode: OPCODE_PING,
-                        data: payload,
-                    }
-                }
-            },
+            SinkMessage::Ping(payload) => Self::ping_message(payload)?,
             SinkMessage::Text {
                 payload,
                 last_fragment,
-            } => {
-                let (opcode, set_fin) =
-                    match (&self.message_in_progress, last_fragment) {
-                        (MessageInProgress::Binary, _) => {
-                            Err(Error::LastMessageUnfinished)
-                        },
-                        (MessageInProgress::None, LastFragment::Yes) => {
-                            Ok((OPCODE_TEXT, SetFin::Yes))
-                        },
-                        (MessageInProgress::None, LastFragment::No) => {
-                            Ok((OPCODE_TEXT, SetFin::No))
-                        },
-                        (MessageInProgress::Text, LastFragment::Yes) => {
-                            Ok((OPCODE_CONTINUATION, SetFin::Yes))
-                        },
-                        (MessageInProgress::Text, LastFragment::No) => {
-                            Ok((OPCODE_CONTINUATION, SetFin::No))
-                        },
-                    }?;
-                self.message_in_progress =
-                    if let LastFragment::No = last_fragment {
-                        MessageInProgress::Text
-                    } else {
-                        MessageInProgress::None
-                    };
-                WorkerMessage::Send {
-                    set_fin,
-                    opcode,
-                    data: payload.into(),
-                }
-            },
+            } => self.text_message(last_fragment, payload)?,
             SinkMessage::Binary {
                 payload,
                 last_fragment,
-            } => {
-                let (opcode, set_fin) =
-                    match (&self.message_in_progress, last_fragment) {
-                        (MessageInProgress::Text, _) => {
-                            Err(Error::LastMessageUnfinished)
-                        },
-                        (MessageInProgress::None, LastFragment::Yes) => {
-                            Ok((OPCODE_BINARY, SetFin::Yes))
-                        },
-                        (MessageInProgress::None, LastFragment::No) => {
-                            Ok((OPCODE_BINARY, SetFin::No))
-                        },
-                        (MessageInProgress::Binary, LastFragment::Yes) => {
-                            Ok((OPCODE_CONTINUATION, SetFin::Yes))
-                        },
-                        (MessageInProgress::Binary, LastFragment::No) => {
-                            Ok((OPCODE_CONTINUATION, SetFin::No))
-                        },
-                    }?;
-                self.message_in_progress =
-                    if let LastFragment::No = last_fragment {
-                        MessageInProgress::Binary
-                    } else {
-                        MessageInProgress::None
-                    };
-                WorkerMessage::Send {
-                    set_fin,
-                    opcode,
-                    data: payload,
-                }
-            },
+            } => self.binary_message(last_fragment, payload)?,
             SinkMessage::Close {
                 code,
                 reason,
-            } => {
-                if reason.as_bytes().len() + 2 > MAX_CONTROL_FRAME_DATA_LENGTH {
-                    return Err(Error::FramePayloadTooLarge);
-                } else {
-                    self.close_sent = true;
-                    WorkerMessage::Send {
-                        set_fin: SetFin::Yes,
-                        opcode: OPCODE_CLOSE,
-                        data: {
-                            let mut data = Vec::new();
-                            data.push_word(code, 16);
-                            data.extend(reason.as_bytes());
-                            data
-                        },
-                    }
-                }
-            },
-            SinkMessage::CloseNoStatus => {
-                self.close_sent = true;
-                WorkerMessage::Send {
-                    set_fin: SetFin::Yes,
-                    opcode: OPCODE_CLOSE,
-                    data: vec![],
-                }
-            },
+            } => self.close_message_with_status(code, reason.as_bytes())?,
+            SinkMessage::CloseNoStatus => self.close_message_without_status(),
         };
         self.work_in.start_send(item).map_err(|_| Error::Closed)
     }
