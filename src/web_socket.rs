@@ -339,227 +339,255 @@ async fn receive_bytes(
     Ok(())
 }
 
-async fn receive_frame_binary(
-    message_reassembly_buffer: &mut Vec<u8>,
-    message_in_progress: &mut MessageInProgress,
-    mut payload: Vec<u8>,
-    fin: bool,
-    received_messages: &Mutex<ReceivedMessages>,
-) -> Result<(), Error> {
-    message_reassembly_buffer.append(&mut payload);
-    *message_in_progress = if fin {
-        let mut message = Vec::new();
-        std::mem::swap(&mut message, message_reassembly_buffer);
-        let mut received_messages = received_messages.lock().await;
-        received_messages.push(StreamMessage::Binary(message));
-        MessageInProgress::None
-    } else {
-        MessageInProgress::Binary
-    };
-    Ok(())
-}
-
-async fn receive_frame_text(
-    message_reassembly_buffer: &mut Vec<u8>,
-    message_in_progress: &mut MessageInProgress,
-    mut payload: Vec<u8>,
-    fin: bool,
-    received_messages: &Mutex<ReceivedMessages>,
-) -> Result<(), Error> {
-    message_reassembly_buffer.append(&mut payload);
-    *message_in_progress = if fin {
-        let message = std::str::from_utf8(message_reassembly_buffer).map_err(
-            |source| Error::Utf8 {
-                source,
-                context: "text message",
-            },
-        )?;
-        let mut received_messages = received_messages.lock().await;
-        received_messages.push(StreamMessage::Text(String::from(message)));
-        message_reassembly_buffer.clear();
-        MessageInProgress::None
-    } else {
-        MessageInProgress::Text
-    };
-    Ok(())
-}
-
 enum ReceivedCloseFrame {
     Yes,
     No,
 }
 
-// TODO: Refactor this function so we don't need to suppress these warnings.
-#[allow(clippy::too_many_lines)]
-#[allow(clippy::too_many_arguments)]
-async fn receive_frame(
-    message_reassembly_buffer: &mut Vec<u8>,
-    message_in_progress: &mut MessageInProgress,
-    frame_reassembly_buffer: &[u8],
-    header_length: usize,
-    payload_length: usize,
+struct FrameReceiver<'a> {
     mask_direction: MaskDirection,
-    received_messages: &Mutex<ReceivedMessages>,
-    message_handler: &Mutex<MessageHandler>,
-) -> Result<ReceivedCloseFrame, Error> {
-    // Decode the FIN flag.
-    let fin = (frame_reassembly_buffer[0] & FIN) != 0;
+    message_handler: &'a Mutex<MessageHandler>,
+    message_reassembly_buffer: Vec<u8>,
+    message_in_progress: MessageInProgress,
+    received_messages: &'a Mutex<ReceivedMessages>,
+}
 
-    // Decode the reserved bits, and reject the frame if any are set.
-    let reserved_bits = (frame_reassembly_buffer[0] >> 4) & 0x07;
-    if reserved_bits != 0 {
-        return Err(Error::BadFrame("reserved bits set"));
+impl<'a> FrameReceiver<'a> {
+    fn new(
+        mask_direction: MaskDirection,
+        message_handler: &'a Mutex<MessageHandler>,
+        received_messages: &'a Mutex<ReceivedMessages>,
+    ) -> Self {
+        Self {
+            mask_direction,
+            message_handler,
+            message_in_progress: MessageInProgress::None,
+            message_reassembly_buffer: Vec::new(),
+            received_messages,
+        }
     }
 
-    // Decode the MASK flag.
-    let mask = (frame_reassembly_buffer[1] & MASK) != 0;
+    // TODO: Refactor this function so we don't need to suppress these warnings.
+    #[allow(clippy::too_many_lines)]
+    async fn receive_frame(
+        &mut self,
+        frame_reassembly_buffer: &[u8],
+        header_length: usize,
+        payload_length: usize,
+    ) -> Result<ReceivedCloseFrame, Error> {
+        // Decode the FIN flag.
+        let fin = (frame_reassembly_buffer[0] & FIN) != 0;
 
-    // Verify the MASK flag is correct.  If we are supposed to have data
-    // masked in the receive direction, MASK should be set.  Otherwise,
-    // it should be clear.
-    match (mask, mask_direction) {
-        (true, MaskDirection::Transmit) => {
-            return Err(Error::BadFrame("masked frame"));
-        },
-        (false, MaskDirection::Receive) => {
-            return Err(Error::BadFrame("unmasked frame"));
-        },
-        _ => (),
-    }
+        // Decode the reserved bits, and reject the frame if any are set.
+        let reserved_bits = (frame_reassembly_buffer[0] >> 4) & 0x07;
+        if reserved_bits != 0 {
+            return Err(Error::BadFrame("reserved bits set"));
+        }
 
-    // Decode the opcode.  This determines:
-    // * If this is a continuation of a fragmented message, or the first (and
-    //   perhaps only) fragment of a new message.
-    // * The type of message.
-    let opcode = frame_reassembly_buffer[0] & 0x0F;
+        // Decode the MASK flag.
+        let mask = (frame_reassembly_buffer[1] & MASK) != 0;
 
-    // Recover the payload from the frame, applying the mask if necessary.
-    let mut payload = frame_reassembly_buffer
-        [header_length..header_length + payload_length]
-        .to_vec();
-    if mask {
-        let mask_bytes =
-            &frame_reassembly_buffer[header_length - 4..header_length];
-        payload
-            .iter_mut()
-            .zip(mask_bytes.iter().cycle())
-            .for_each(|(payload_byte, mask_byte)| *payload_byte ^= mask_byte);
-    }
+        // Verify the MASK flag is correct.  If we are supposed to have data
+        // masked in the receive direction, MASK should be set.  Otherwise,
+        // it should be clear.
+        match (mask, self.mask_direction) {
+            (true, MaskDirection::Transmit) => {
+                return Err(Error::BadFrame("masked frame"));
+            },
+            (false, MaskDirection::Receive) => {
+                return Err(Error::BadFrame("unmasked frame"));
+            },
+            _ => (),
+        }
 
-    match opcode {
-        OPCODE_CONTINUATION => {
-            match message_in_progress {
-                MessageInProgress::None => {
-                    return Err(Error::BadFrame(
-                        "unexpected continuation frame",
-                    ))
-                },
-                MessageInProgress::Text => {
-                    receive_frame_text(
-                        message_reassembly_buffer,
-                        message_in_progress,
-                        payload,
-                        fin,
-                        received_messages,
-                    )
+        // Decode the opcode.  This determines:
+        // * If this is a continuation of a fragmented message, or the first
+        //   (and perhaps only) fragment of a new message.
+        // * The type of message.
+        let opcode = frame_reassembly_buffer[0] & 0x0F;
+
+        // Recover the payload from the frame, applying the mask if necessary.
+        let mut payload = frame_reassembly_buffer
+            [header_length..header_length + payload_length]
+            .to_vec();
+        if mask {
+            let mask_bytes =
+                &frame_reassembly_buffer[header_length - 4..header_length];
+            payload.iter_mut().zip(mask_bytes.iter().cycle()).for_each(
+                |(payload_byte, mask_byte)| *payload_byte ^= mask_byte,
+            );
+        }
+
+        match opcode {
+            OPCODE_CONTINUATION => {
+                match self.message_in_progress {
+                    MessageInProgress::None => {
+                        return Err(Error::BadFrame(
+                            "unexpected continuation frame",
+                        ))
+                    },
+                    MessageInProgress::Text => {
+                        self.receive_frame_text(payload, fin).await?;
+                    },
+                    MessageInProgress::Binary => {
+                        self.receive_frame_binary(payload, fin).await?;
+                    },
+                }
+                Ok(ReceivedCloseFrame::No)
+            },
+
+            OPCODE_TEXT => {
+                if let MessageInProgress::None = self.message_in_progress {
+                    self.receive_frame_text(payload, fin).await?;
+                } else {
+                    return Err(Error::BadFrame("last message incomplete"));
+                }
+                Ok(ReceivedCloseFrame::No)
+            },
+
+            OPCODE_BINARY => {
+                if let MessageInProgress::None = self.message_in_progress {
+                    self.receive_frame_binary(payload, fin).await?
+                } else {
+                    return Err(Error::BadFrame("last message incomplete"));
+                }
+                Ok(ReceivedCloseFrame::No)
+            },
+
+            OPCODE_PING => {
+                if !fin {
+                    return Err(Error::BadFrame("fragmented control frame"));
+                }
+                self.message_handler
+                    .lock()
+                    .await
+                    .send_frame(SetFin::Yes, OPCODE_PONG, payload.clone())
                     .await?;
-                },
-                MessageInProgress::Binary => {
-                    receive_frame_binary(
-                        message_reassembly_buffer,
-                        message_in_progress,
-                        payload,
-                        fin,
-                        received_messages,
-                    )
-                    .await?;
-                },
-            }
-            Ok(ReceivedCloseFrame::No)
-        },
+                self.received_messages
+                    .lock()
+                    .await
+                    .push(StreamMessage::Ping(payload));
+                Ok(ReceivedCloseFrame::No)
+            },
 
-        OPCODE_TEXT => {
-            if let MessageInProgress::None = message_in_progress {
-                receive_frame_text(
-                    message_reassembly_buffer,
-                    message_in_progress,
-                    payload,
-                    fin,
-                    received_messages,
-                )
-                .await?;
-            } else {
-                return Err(Error::BadFrame("last message incomplete"));
-            }
-            Ok(ReceivedCloseFrame::No)
-        },
+            OPCODE_PONG => {
+                if !fin {
+                    return Err(Error::BadFrame("fragmented control frame"));
+                }
+                self.received_messages
+                    .lock()
+                    .await
+                    .push(StreamMessage::Pong(payload));
+                Ok(ReceivedCloseFrame::No)
+            },
 
-        OPCODE_BINARY => {
-            if let MessageInProgress::None = message_in_progress {
-                receive_frame_binary(
-                    message_reassembly_buffer,
-                    message_in_progress,
-                    payload,
-                    fin,
-                    received_messages,
-                )
-                .await?
-            } else {
-                return Err(Error::BadFrame("last message incomplete"));
-            }
-            Ok(ReceivedCloseFrame::No)
-        },
+            OPCODE_CLOSE => {
+                if !fin {
+                    return Err(Error::BadFrame("fragmented control frame"));
+                }
+                let mut code = 1005;
+                let mut reason = String::new();
+                if payload.len() >= 2 {
+                    code = ((payload[0] as usize) << 8) + (payload[1] as usize);
+                    reason = String::from(
+                        std::str::from_utf8(&payload[2..]).map_err(
+                            |source| Error::Utf8 {
+                                source,
+                                context: "close reason",
+                            },
+                        )?,
+                    );
+                }
+                self.received_messages.lock().await.push(
+                    StreamMessage::Close {
+                        code,
+                        reason,
+                    },
+                );
+                Ok(ReceivedCloseFrame::Yes)
+            },
 
-        OPCODE_PING => {
-            if !fin {
-                return Err(Error::BadFrame("fragmented control frame"));
-            }
-            message_handler
-                .lock()
-                .await
-                .send_frame(SetFin::Yes, OPCODE_PONG, payload.clone())
-                .await?;
-            received_messages.lock().await.push(StreamMessage::Ping(payload));
-            Ok(ReceivedCloseFrame::No)
-        },
+            _ => Err(Error::BadFrame("unknown opcode")),
+        }
+    }
 
-        OPCODE_PONG => {
-            if !fin {
-                return Err(Error::BadFrame("fragmented control frame"));
-            }
-            received_messages.lock().await.push(StreamMessage::Pong(payload));
-            Ok(ReceivedCloseFrame::No)
-        },
+    async fn receive_frame_binary(
+        &mut self,
+        mut payload: Vec<u8>,
+        fin: bool,
+    ) -> Result<(), Error> {
+        self.message_reassembly_buffer.append(&mut payload);
+        self.message_in_progress = if fin {
+            let mut message = Vec::new();
+            std::mem::swap(&mut message, &mut self.message_reassembly_buffer);
+            let mut received_messages = self.received_messages.lock().await;
+            received_messages.push(StreamMessage::Binary(message));
+            MessageInProgress::None
+        } else {
+            MessageInProgress::Binary
+        };
+        Ok(())
+    }
 
-        OPCODE_CLOSE => {
-            if !fin {
-                return Err(Error::BadFrame("fragmented control frame"));
-            }
-            let mut code = 1005;
-            let mut reason = String::new();
-            if payload.len() >= 2 {
-                code = ((payload[0] as usize) << 8) + (payload[1] as usize);
-                reason =
-                    String::from(std::str::from_utf8(&payload[2..]).map_err(
-                        |source| Error::Utf8 {
-                            source,
-                            context: "close reason",
-                        },
-                    )?);
-            }
-            received_messages.lock().await.push(StreamMessage::Close {
-                code,
-                reason,
-            });
-            Ok(ReceivedCloseFrame::Yes)
-        },
-
-        _ => Err(Error::BadFrame("unknown opcode")),
+    async fn receive_frame_text(
+        &mut self,
+        mut payload: Vec<u8>,
+        fin: bool,
+    ) -> Result<(), Error> {
+        self.message_reassembly_buffer.append(&mut payload);
+        self.message_in_progress = if fin {
+            let message = std::str::from_utf8(&self.message_reassembly_buffer)
+                .map_err(|source| Error::Utf8 {
+                    source,
+                    context: "text message",
+                })?;
+            let mut received_messages = self.received_messages.lock().await;
+            received_messages.push(StreamMessage::Text(String::from(message)));
+            self.message_reassembly_buffer.clear();
+            MessageInProgress::None
+        } else {
+            MessageInProgress::Text
+        };
+        Ok(())
     }
 }
 
-// TODO: Needs refactoring
-#[allow(clippy::too_many_lines)]
+fn decode_frame_header_payload_lengths(frame: &[u8]) -> Option<(usize, usize)> {
+    match frame[1] & !MASK {
+        126 => {
+            let header_length = 4;
+            if frame.len() < header_length {
+                None
+            } else {
+                let payload_length =
+                    ((frame[2] as usize) << 8) + frame[3] as usize;
+                Some((header_length, payload_length))
+            }
+        },
+        127 => {
+            let header_length = 10;
+            if frame.len() < header_length {
+                None
+            } else {
+                let payload_length = ((frame[2] as usize) << 56)
+                    + ((frame[3] as usize) << 48)
+                    + ((frame[4] as usize) << 40)
+                    + ((frame[5] as usize) << 32)
+                    + ((frame[6] as usize) << 24)
+                    + ((frame[7] as usize) << 16)
+                    + ((frame[8] as usize) << 8)
+                    + frame[9] as usize;
+                Some((header_length, payload_length))
+            }
+        },
+        length_first_octet => {
+            let header_length = 2;
+            let payload_length = length_first_octet as usize;
+            Some((header_length, payload_length))
+        },
+    }
+}
+
 async fn try_receive_frames(
     mut connection_rx: Box<dyn ConnectionRx>,
     received_messages: &Mutex<ReceivedMessages>,
@@ -568,9 +596,9 @@ async fn try_receive_frames(
     message_handler: &Mutex<MessageHandler>,
     close_sent: oneshot::Receiver<()>,
 ) -> Result<(), Error> {
+    let mut frame_receiver =
+        FrameReceiver::new(mask_direction, message_handler, received_messages);
     let mut frame_reassembly_buffer = Vec::new();
-    let mut message_reassembly_buffer = Vec::new();
-    let mut message_in_progress = MessageInProgress::None;
     let mut need_more_input = true;
     let mut read_chunk_size = INITIAL_READ_CHUNK_SIZE;
     loop {
@@ -602,41 +630,7 @@ async fn try_receive_frames(
         // of that first byte.  We may loop back to the top if we find that
         // we haven't received enough bytes to determine the payload length.
         if let Some((mut header_length, payload_length)) =
-            match frame_reassembly_buffer[1] & !MASK {
-                126 => {
-                    let header_length = 4;
-                    if frame_reassembly_buffer.len() < header_length {
-                        None
-                    } else {
-                        let payload_length =
-                            ((frame_reassembly_buffer[2] as usize) << 8)
-                                + frame_reassembly_buffer[3] as usize;
-                        Some((header_length, payload_length))
-                    }
-                },
-                127 => {
-                    let header_length = 10;
-                    if frame_reassembly_buffer.len() < header_length {
-                        None
-                    } else {
-                        let payload_length =
-                            ((frame_reassembly_buffer[2] as usize) << 56)
-                                + ((frame_reassembly_buffer[3] as usize) << 48)
-                                + ((frame_reassembly_buffer[4] as usize) << 40)
-                                + ((frame_reassembly_buffer[5] as usize) << 32)
-                                + ((frame_reassembly_buffer[6] as usize) << 24)
-                                + ((frame_reassembly_buffer[7] as usize) << 16)
-                                + ((frame_reassembly_buffer[8] as usize) << 8)
-                                + frame_reassembly_buffer[9] as usize;
-                        Some((header_length, payload_length))
-                    }
-                },
-                length_first_octet => {
-                    let header_length = 2;
-                    let payload_length = length_first_octet as usize;
-                    Some((header_length, payload_length))
-                },
-            }
+            decode_frame_header_payload_lengths(&frame_reassembly_buffer)
         {
             if (frame_reassembly_buffer[1] & MASK) != 0 {
                 header_length += 4;
@@ -650,24 +644,17 @@ async fn try_receive_frames(
             if frame_reassembly_buffer.len() < frame_length {
                 continue;
             }
-            if let ReceivedCloseFrame::Yes = receive_frame(
-                &mut message_reassembly_buffer,
-                &mut message_in_progress,
-                &frame_reassembly_buffer[0..frame_length],
-                header_length,
-                payload_length,
-                mask_direction,
-                received_messages,
-                message_handler,
-            )
-            .await?
+            if let ReceivedCloseFrame::Yes = frame_receiver
+                .receive_frame(
+                    &frame_reassembly_buffer[0..frame_length],
+                    header_length,
+                    payload_length,
+                )
+                .await?
             {
                 let _ = close_sent.await;
                 return Ok(());
             }
-            // TODO: This is expensive, especially if we get a large number
-            // of bytes following the frame we just received.  Look for
-            // a better way of handling the left-overs.
             frame_reassembly_buffer.drain(0..frame_length);
 
             // Try to recover more frames from what we already received,
