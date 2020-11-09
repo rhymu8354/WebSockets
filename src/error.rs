@@ -61,7 +61,7 @@ pub enum Error {
     /// opening handshake did not indicate that the connection should be
     /// upgraded to a WebSocket.
     #[error("the upgrade request did not indicate that the connection should be upgraded to be a WebSocket")]
-    ProtocolUpgradeRequstNotAWebSocket,
+    ProtocolUpgradeRequestNotAWebSocket,
 
     /// The WebSocket could not be opened because the HTTP request in the
     /// opening handshake requested an unsupported version of the WebSocket

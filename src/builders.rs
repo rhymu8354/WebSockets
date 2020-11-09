@@ -60,7 +60,7 @@ pub fn open_server(
             Some(value) if value.eq_ignore_ascii_case("websocket")
         ) =>
         {
-            Err(Error::ProtocolUpgradeRequstNotAWebSocket)
+            Err(Error::ProtocolUpgradeRequestNotAWebSocket)
         },
         _ if !matches!(
             request.headers.header_value("Sec-WebSocket-Version"),
@@ -644,7 +644,7 @@ mod tests {
                 &request,
                 None,
             ),
-            Err(Error::ProtocolUpgradeRequstNotAWebSocket)
+            Err(Error::ProtocolUpgradeRequestNotAWebSocket)
         ));
     }
 
@@ -667,7 +667,7 @@ mod tests {
                 &request,
                 None,
             ),
-            Err(Error::ProtocolUpgradeRequstNotAWebSocket)
+            Err(Error::ProtocolUpgradeRequestNotAWebSocket)
         ));
     }
 
