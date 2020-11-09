@@ -8,6 +8,7 @@ mod builders;
 mod error;
 mod mock_connection;
 mod timeout;
+mod vec_ext;
 mod web_socket;
 
 pub use builders::{
@@ -20,6 +21,7 @@ use futures::{
     AsyncRead,
     AsyncWrite,
 };
+use vec_ext::VecExt;
 use web_socket::MaskDirection;
 pub use web_socket::WebSocket;
 

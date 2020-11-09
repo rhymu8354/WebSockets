@@ -2,6 +2,7 @@ use super::{
     ConnectionRx,
     ConnectionTx,
     Error,
+    VecExt,
 };
 use async_mutex::Mutex;
 use futures::{
@@ -247,29 +248,18 @@ impl MessageHandler {
         // the length falls into: either 1, 2, or 8 bytes.  For the 2 and 8
         // byte variants, the first byte is a special marker.  Also, the MASK
         // flag is added to the first byte always.
-        //
-        // TODO: Find out if there's a nicer way to avoid the truncation
-        // warning about casting to `u8`.
-        #[allow(clippy::cast_possible_truncation)]
         match num_payload_bytes {
             0..=125 => {
+                #[allow(clippy::cast_possible_truncation)]
                 frame.push(num_payload_bytes as u8 | mask);
             },
             126..=65535 => {
                 frame.push(126 | mask);
-                frame.push((num_payload_bytes >> 8) as u8);
-                frame.push((num_payload_bytes & 0xFF) as u8);
+                frame.push_word(num_payload_bytes, 16);
             },
             _ => {
                 frame.push(127 | mask);
-                frame.push((num_payload_bytes >> 56) as u8);
-                frame.push(((num_payload_bytes >> 48) & 0xFF) as u8);
-                frame.push(((num_payload_bytes >> 40) & 0xFF) as u8);
-                frame.push(((num_payload_bytes >> 32) & 0xFF) as u8);
-                frame.push(((num_payload_bytes >> 24) & 0xFF) as u8);
-                frame.push(((num_payload_bytes >> 16) & 0xFF) as u8);
-                frame.push(((num_payload_bytes >> 8) & 0xFF) as u8);
-                frame.push((num_payload_bytes & 0xFF) as u8);
+                frame.push_word(num_payload_bytes, 64);
             },
         }
 
@@ -317,11 +307,8 @@ impl MessageHandler {
         let payload = if code == 1005 {
             vec![]
         } else {
-            // TODO: Find out if there's a nicer way to avoid the
-            // truncation warning about casting to
-            // `u8`.
-            #[allow(clippy::cast_possible_truncation)]
-            let mut payload = vec![(code >> 8) as u8, code as u8];
+            let mut payload = Vec::new();
+            payload.push_word(code, 16);
             payload.extend(reason.as_bytes());
             payload
         };
@@ -1008,11 +995,8 @@ impl Sink<SinkMessage> for WebSocket {
                     set_fin: SetFin::Yes,
                     opcode: OPCODE_CLOSE,
                     data: {
-                        // TODO: Find out if there's a nicer way to avoid the
-                        // truncation warning about casting to
-                        // `u8`.
-                        #[allow(clippy::cast_possible_truncation)]
-                        let mut data = vec![(code >> 8) as u8, code as u8];
+                        let mut data = Vec::new();
+                        data.push_word(code, 16);
                         // TODO: Check to make sure reason isn't too long.
                         data.extend(reason.as_bytes());
                         data
