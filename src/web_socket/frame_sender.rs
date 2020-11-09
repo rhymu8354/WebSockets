@@ -104,9 +104,12 @@ impl FrameSender {
             // rotates around (0, 1, 2, 3, 0, 1, 2, 3, 0, ...).
             // The mask is applied by computing XOR (bit-wise exclusive-or)
             // one mask byte for every payload byte.
-            for (i, byte) in payload.iter().enumerate() {
-                frame.push(byte ^ masking_key[i % 4]);
-            }
+            frame.extend(
+                payload
+                    .iter()
+                    .zip(masking_key.iter().cycle())
+                    .map(|(&payload_byte, &mask)| payload_byte ^ mask),
+            );
         }
 
         // Push the frame out to the underlying connection.  Note that this

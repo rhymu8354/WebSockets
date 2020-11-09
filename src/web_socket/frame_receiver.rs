@@ -86,7 +86,7 @@ impl<'a> FrameReceiver<'a> {
             let mask_bytes =
                 &frame_reassembly_buffer[header_length - 4..header_length];
             payload.iter_mut().zip(mask_bytes.iter().cycle()).for_each(
-                |(payload_byte, mask_byte)| *payload_byte ^= mask_byte,
+                |(payload_byte, &mask_byte)| *payload_byte ^= mask_byte,
             );
         }
 
@@ -155,8 +155,10 @@ impl<'a> FrameReceiver<'a> {
         self.message_in_progress = if fin {
             let mut message = Vec::new();
             std::mem::swap(&mut message, &mut self.message_reassembly_buffer);
-            let mut received_messages = self.received_messages.lock().await;
-            received_messages.push(StreamMessage::Binary(message));
+            self.received_messages
+                .lock()
+                .await
+                .push(StreamMessage::Binary(message));
             MessageInProgress::None
         } else {
             MessageInProgress::Binary
@@ -229,8 +231,10 @@ impl<'a> FrameReceiver<'a> {
                     source,
                     context: "text message",
                 })?;
-            let mut received_messages = self.received_messages.lock().await;
-            received_messages.push(StreamMessage::Text(String::from(message)));
+            self.received_messages
+                .lock()
+                .await
+                .push(StreamMessage::Text(String::from(message)));
             self.message_reassembly_buffer.clear();
             MessageInProgress::None
         } else {
