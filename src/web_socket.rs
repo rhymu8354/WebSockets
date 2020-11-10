@@ -2268,4 +2268,53 @@ mod tests {
             Err(Error::FramePayloadTooLarge)
         ));
     }
+
+    #[test]
+    fn receive_close_reason_too_long() {
+        let (connection_tx, _connection_back_tx) = mock_connection::Tx::new();
+        let (connection_rx, connection_back_rx) = mock_connection::Rx::new();
+        let ws = WebSocket::new(
+            Box::new(connection_tx),
+            Box::new(connection_rx),
+            MaskDirection::Transmit,
+            Vec::new(),
+            None,
+        );
+        let connection_back_rx = RefCell::new(connection_back_rx);
+        let reader = async {
+            ws.fold(false, |_, message| async {
+                match message {
+                    StreamMessage::Close {
+                        code,
+                        reason,
+                    } => {
+                        // Check that the code and reason are correct.
+                        assert_eq!(1002, code);
+                        assert_eq!("frame too large", reason);
+
+                        // Now the we're done, we can close the connection.
+                        connection_back_rx.borrow_mut().close().await;
+                        true
+                    },
+
+                    _ => panic!("we got something that isn't a close!"),
+                }
+            })
+            .await
+        };
+        connection_back_rx.borrow_mut().web_socket_input(
+            b"\x88\x7e\x00\x7e\x03\xe8"
+                .iter()
+                .copied()
+                .chain(std::iter::repeat(0x2a).take(124))
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(
+            Ok(true),
+            executor::block_on(timeout(
+                REASONABLE_FAST_OPERATION_TIMEOUT,
+                reader,
+            ))
+        );
+    }
 }

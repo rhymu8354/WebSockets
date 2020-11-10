@@ -9,6 +9,7 @@ use super::{
     StreamMessageSender,
     FIN,
     MASK,
+    MAX_CONTROL_FRAME_DATA_LENGTH,
     OPCODE_BINARY,
     OPCODE_CLOSE,
     OPCODE_CONTINUATION,
@@ -77,6 +78,16 @@ impl<'a> FrameReceiver<'a> {
         //   (and perhaps only) fragment of a new message.
         // * The type of message.
         let opcode = frame_reassembly_buffer[0] & 0x0F;
+
+        // If the opcode indicates a control frame, verify that the payload is
+        // small enough. (RFC 6455 section 5.5 says, "All control frames MUST
+        // have a payload length of 125 bytes or less and MUST NOT be
+        // fragmented.")
+        if (opcode & 0b_1000) != 0
+            && payload_length > MAX_CONTROL_FRAME_DATA_LENGTH
+        {
+            return Err(Error::BadFrame("frame too large"));
+        }
 
         // Recover the payload from the frame, applying the mask if necessary.
         let mut payload = frame_reassembly_buffer
