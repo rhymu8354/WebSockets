@@ -207,6 +207,7 @@ where
     let client = HttpClient::new();
     let base_url = base_url.as_ref();
     let cases = get_case_count(&client, base_url).await?;
+    // let cases = 220;
     println!("There are {} test cases enabled in the fuzzserver.", cases);
     let agent = agent.as_ref();
     for case in 1..=cases {
