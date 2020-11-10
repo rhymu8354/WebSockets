@@ -84,10 +84,16 @@ async fn connect(
     }
 }
 
-async fn get_case_count(client: &HttpClient) -> Result<usize, Error> {
+async fn get_case_count<T>(
+    client: &HttpClient,
+    base_url: T,
+) -> Result<usize, Error>
+where
+    T: AsRef<str>,
+{
     let mut ws = connect(
         client,
-        Uri::parse("ws://cheetah.local:9001/getCaseCount").unwrap(),
+        Uri::parse(format!("{}/getCaseCount", base_url.as_ref())).unwrap(),
     )
     .await?;
     if let Some(websockets::StreamMessage::Text(message)) = ws.next().await {
@@ -99,6 +105,7 @@ async fn get_case_count(client: &HttpClient) -> Result<usize, Error> {
 
 async fn run_test<T>(
     client: &HttpClient,
+    base_url: T,
     case: usize,
     cases: usize,
     agent: T,
@@ -110,7 +117,8 @@ where
     let (sink, stream) = connect(
         client,
         Uri::parse(format!(
-            "ws://cheetah.local:9001/runCase?case={}&agent={}",
+            "{}/runCase?case={}&agent={}",
+            base_url.as_ref(),
             case,
             agent.as_ref()
         ))
@@ -163,6 +171,7 @@ where
 
 async fn update_reports<T>(
     client: &HttpClient,
+    base_url: T,
     agent: T,
 ) -> Result<(), Error>
 where
@@ -172,7 +181,8 @@ where
     let mut ws = connect(
         client,
         Uri::parse(format!(
-            "ws://cheetah.local:9001/updateReports?agent={}",
+            "{}/updateReports?agent={}",
+            base_url.as_ref(),
             agent.as_ref()
         ))
         .unwrap(),
@@ -187,17 +197,20 @@ where
     Ok(())
 }
 
-async fn run_tests<T>(agent: T) -> Result<(), Error>
+async fn run_tests<T>(
+    base_url: T,
+    agent: T,
+) -> Result<(), Error>
 where
     T: AsRef<str>,
 {
     let client = HttpClient::new();
-    let cases = get_case_count(&client).await?;
+    let base_url = base_url.as_ref();
+    let cases = get_case_count(&client, base_url).await?;
     println!("There are {} test cases enabled in the fuzzserver.", cases);
-    let client = &client;
     let agent = agent.as_ref();
     for case in 1..=cases {
-        match run_test(client, case, cases, agent).await {
+        match run_test(&client, base_url, case, cases, agent).await {
             Err(error) => match error.source() {
                 Some(source) => eprintln!("error: {} ({})", error, source),
                 None => eprintln!("error: {}", error),
@@ -205,10 +218,10 @@ where
             Ok(()) => {},
         }
     }
-    update_reports(client, agent).await?;
+    update_reports(&client, base_url, agent).await?;
     Ok(())
 }
 
 fn main() -> Result<(), Error> {
-    executor::block_on(run_tests("rhymu-websocket"))
+    executor::block_on(run_tests("ws://cheetah.local:9001", "rhymu-websocket"))
 }
