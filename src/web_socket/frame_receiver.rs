@@ -4,9 +4,9 @@ use super::{
     MaskDirection,
     MessageInProgress,
     ReceivedCloseFrame,
-    ReceivedMessages,
     SetFin,
     StreamMessage,
+    StreamMessageSender,
     FIN,
     MASK,
     OPCODE_BINARY,
@@ -23,14 +23,14 @@ pub struct FrameReceiver<'a> {
     frame_sender: &'a Mutex<FrameSender>,
     message_reassembly_buffer: Vec<u8>,
     message_in_progress: MessageInProgress,
-    received_messages: &'a Mutex<ReceivedMessages>,
+    received_messages: &'a StreamMessageSender,
 }
 
 impl<'a> FrameReceiver<'a> {
     pub fn new(
         mask_direction: MaskDirection,
         frame_sender: &'a Mutex<FrameSender>,
-        received_messages: &'a Mutex<ReceivedMessages>,
+        received_messages: &'a StreamMessageSender,
     ) -> Self {
         Self {
             mask_direction,
@@ -127,10 +127,9 @@ impl<'a> FrameReceiver<'a> {
                 if !fin {
                     return Err(Error::BadFrame("fragmented control frame"));
                 }
-                self.received_messages
-                    .lock()
-                    .await
-                    .push(StreamMessage::Pong(payload));
+                let _ = self
+                    .received_messages
+                    .unbounded_send(StreamMessage::Pong(payload));
                 Ok(ReceivedCloseFrame::No)
             },
 
@@ -155,10 +154,9 @@ impl<'a> FrameReceiver<'a> {
         self.message_in_progress = if fin {
             let mut message = Vec::new();
             std::mem::swap(&mut message, &mut self.message_reassembly_buffer);
-            self.received_messages
-                .lock()
-                .await
-                .push(StreamMessage::Binary(message));
+            let _ = self
+                .received_messages
+                .unbounded_send(StreamMessage::Binary(message));
             MessageInProgress::None
         } else {
             MessageInProgress::Binary
@@ -181,7 +179,7 @@ impl<'a> FrameReceiver<'a> {
                 },
             )?);
         }
-        self.received_messages.lock().await.push(StreamMessage::Close {
+        let _ = self.received_messages.unbounded_send(StreamMessage::Close {
             code,
             reason,
         });
@@ -215,7 +213,8 @@ impl<'a> FrameReceiver<'a> {
             .await
             .send_frame(SetFin::Yes, OPCODE_PONG, payload.clone())
             .await?;
-        self.received_messages.lock().await.push(StreamMessage::Ping(payload));
+        let _ =
+            self.received_messages.unbounded_send(StreamMessage::Ping(payload));
         Ok(())
     }
 
@@ -231,10 +230,9 @@ impl<'a> FrameReceiver<'a> {
                     source,
                     context: "text message",
                 })?;
-            self.received_messages
-                .lock()
-                .await
-                .push(StreamMessage::Text(String::from(message)));
+            let _ = self
+                .received_messages
+                .unbounded_send(StreamMessage::Text(String::from(message)));
             self.message_reassembly_buffer.clear();
             MessageInProgress::None
         } else {

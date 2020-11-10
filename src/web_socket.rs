@@ -21,19 +21,13 @@ use futures::{
         TryStreamExt,
     },
     AsyncReadExt,
-    Future,
     FutureExt,
     Sink,
     SinkExt,
     Stream,
 };
 use std::{
-    collections::VecDeque,
-    sync::Arc,
-    task::{
-        Poll,
-        Waker,
-    },
+    task::Poll,
     thread,
 };
 
@@ -128,32 +122,8 @@ pub enum ReceivedCloseFrame {
     No,
 }
 
-pub struct ReceivedMessages {
-    fused: bool,
-    queue: VecDeque<StreamMessage>,
-    waker: Option<Waker>,
-}
-
-impl ReceivedMessages {
-    fn push(
-        &mut self,
-        message: StreamMessage,
-    ) {
-        self.queue.push_back(message);
-        self.wake();
-    }
-
-    fn fuse(&mut self) {
-        self.fused = true;
-        self.wake();
-    }
-
-    fn wake(&mut self) {
-        if let Some(waker) = self.waker.take() {
-            waker.wake();
-        }
-    }
-}
+type StreamMessageSender = mpsc::UnboundedSender<StreamMessage>;
+type StreamMessageReceiver = mpsc::UnboundedReceiver<StreamMessage>;
 
 enum WorkerMessage {
     // This tells the worker thread to terminate.
@@ -275,7 +245,7 @@ async fn receive_bytes(
 
 async fn receive_frames(
     connection_rx: Box<dyn ConnectionRx>,
-    received_messages: Arc<Mutex<ReceivedMessages>>,
+    received_messages: StreamMessageSender,
     max_frame_size: Option<usize>,
     mask_direction: MaskDirection,
     frame_sender: &Mutex<FrameSender>,
@@ -283,7 +253,7 @@ async fn receive_frames(
 ) {
     if let Err(error) = try_receive_frames(
         connection_rx,
-        &*received_messages,
+        &received_messages,
         max_frame_size,
         mask_direction,
         frame_sender,
@@ -292,18 +262,18 @@ async fn receive_frames(
     .await
     {
         let (code, reason) = close_code_and_reason_from_error(error);
-        received_messages.lock().await.push(StreamMessage::Close {
+        let _ = received_messages.unbounded_send(StreamMessage::Close {
             code,
             reason: reason.clone(),
         });
         frame_sender.lock().await.send_close(code, reason).await;
     }
-    received_messages.lock().await.fuse();
+    received_messages.close_channel();
 }
 
 async fn try_receive_frames(
     mut connection_rx: Box<dyn ConnectionRx>,
-    received_messages: &Mutex<ReceivedMessages>,
+    received_messages: &StreamMessageSender,
     max_frame_size: Option<usize>,
     mask_direction: MaskDirection,
     frame_sender: &Mutex<FrameSender>,
@@ -389,7 +359,7 @@ async fn try_receive_frames(
 #[allow(clippy::mut_mut)]
 async fn worker(
     work_in_receiver: mpsc::UnboundedReceiver<WorkerMessage>,
-    received_messages: Arc<Mutex<ReceivedMessages>>,
+    received_messages: StreamMessageSender,
     connection_tx: Box<dyn ConnectionTx>,
     connection_rx: Box<dyn ConnectionRx>,
     mask_direction: MaskDirection,
@@ -422,7 +392,7 @@ async fn worker(
 pub struct WebSocket {
     close_sent: bool,
     message_in_progress: MessageInProgress,
-    received_messages: Arc<Mutex<ReceivedMessages>>,
+    received_messages: StreamMessageReceiver,
 
     // This sender is used to deliver messages to the worker thread.
     work_in: mpsc::UnboundedSender<WorkerMessage>,
@@ -544,23 +514,20 @@ impl WebSocket {
 
         // Make storage for a queue with waker used to deliver received
         // messages back to the user.
-        let received_messages = Arc::new(Mutex::new(ReceivedMessages {
-            fused: false,
-            queue: VecDeque::new(),
-            waker: None,
-        }));
+        let (stream_message_sender, stream_message_receiver) =
+            mpsc::unbounded();
 
         // Store the sender end of the channel and spawn the worker thread,
         // giving it the receiver end as well as the connection.
         Self {
             close_sent: false,
             message_in_progress: MessageInProgress::None,
-            received_messages: received_messages.clone(),
+            received_messages: stream_message_receiver,
             work_in: sender,
             worker: Some(thread::spawn(move || {
                 executor::block_on(worker(
                     receiver,
-                    received_messages,
+                    stream_message_sender,
                     connection_tx,
                     connection_rx,
                     mask_direction,
@@ -652,26 +619,10 @@ impl Stream for WebSocket {
     type Item = StreamMessage;
 
     fn poll_next(
-        self: std::pin::Pin<&mut Self>,
+        mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
-        if let Poll::Ready(mut received_messages) =
-            Box::pin(self.received_messages.lock()).as_mut().poll(cx)
-        {
-            if received_messages.queue.is_empty() {
-                if received_messages.fused {
-                    Poll::Ready(None)
-                } else {
-                    received_messages.waker.replace(cx.waker().clone());
-                    Poll::Pending
-                }
-            } else {
-                let message = received_messages.queue.pop_front();
-                Poll::Ready(message)
-            }
-        } else {
-            Poll::Pending
-        }
+        self.received_messages.poll_next_unpin(cx)
     }
 }
 
@@ -1270,8 +1221,7 @@ mod tests {
             // with no payload.
             connection_back_rx
                 .borrow_mut()
-                .web_socket_input_async(&b"\x88\x80XXXX"[..])
-                .await;
+                .web_socket_input(&b"\x88\x80XXXX"[..]);
         };
         assert!(executor::block_on(async {
             sink.send(SinkMessage::Close {
@@ -1335,22 +1285,19 @@ mod tests {
             // Mock a "CLOSE" response back to the WebSocket,
             // with a payload.
             let mask = [0x12, 0x34, 0x56, 0x78];
-            connection_back_rx
-                .borrow_mut()
-                .web_socket_input_async(
-                    b"\x88\x85"
-                        .iter()
-                        .copied()
-                        .chain(mask.iter().copied())
-                        .chain(
-                            b"\x03\xe8Bye"
-                                .iter()
-                                .zip(mask.iter().cycle())
-                                .map(|(&data, &mask)| data ^ mask),
-                        )
-                        .collect::<Vec<u8>>(),
-                )
-                .await
+            connection_back_rx.borrow_mut().web_socket_input(
+                b"\x88\x85"
+                    .iter()
+                    .copied()
+                    .chain(mask.iter().copied())
+                    .chain(
+                        b"\x03\xe8Bye"
+                            .iter()
+                            .zip(mask.iter().cycle())
+                            .map(|(&data, &mask)| data ^ mask),
+                    )
+                    .collect::<Vec<u8>>(),
+            );
         };
         assert!(executor::block_on(async {
             sink.send(SinkMessage::Close {
