@@ -118,10 +118,6 @@ impl WebSocketClientBuilder {
         rng.fill(&mut nonce);
         let key = base64::encode(nonce);
         request.headers.set_header("Sec-WebSocket-Key", &key);
-        request.headers.set_header("Upgrade", "websocket");
-        let mut connection_tokens = request.headers.header_tokens("Connection");
-        connection_tokens.push(String::from("upgrade"));
-        request.headers.set_header("Connection", connection_tokens.join(", "));
         (
             Self {
                 key,
@@ -220,10 +216,6 @@ mod tests {
         let key = request.headers.header_value("Sec-WebSocket-Key");
         assert!(key.is_some());
         assert!(base64::decode(key.unwrap().as_bytes()).is_ok());
-        let upgrade = request.headers.header_value("Upgrade");
-        assert!(upgrade.is_some());
-        assert_eq!("websocket", upgrade.unwrap().to_ascii_lowercase());
-        assert!(request.headers.has_header_token("Connection", "upgrade"));
     }
 
     #[test]
