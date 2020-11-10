@@ -782,7 +782,11 @@ mod tests {
             ws.ping("x".repeat(126)),
             Err(Error::FramePayloadTooLarge)
         ));
-        assert_eq!(None, connection_back_tx.web_socket_output());
+        assert!(ws.ping("Hello").is_ok());
+        assert_eq!(
+            Some(&b"\x89\x05Hello"[..]),
+            connection_back_tx.web_socket_output().as_deref()
+        );
     }
 
     #[test]
