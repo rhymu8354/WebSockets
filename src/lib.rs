@@ -23,7 +23,12 @@ use futures::{
 };
 use vec_ext::VecExt;
 use web_socket::MaskDirection;
-pub use web_socket::WebSocket;
+pub use web_socket::{
+    LastFragment,
+    SinkMessage,
+    StreamMessage,
+    WebSocket,
+};
 
 pub trait ConnectionTx: AsyncWrite + Send + Unpin + 'static {}
 impl<T: AsyncWrite + Send + Unpin + 'static> ConnectionTx for T {}

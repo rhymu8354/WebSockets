@@ -89,6 +89,7 @@ pub fn open_server(
                     connection_tx,
                     connection_rx,
                     MaskDirection::Receive,
+                    Vec::new(),
                     max_frame_size,
                 ),
                 response,
@@ -131,6 +132,7 @@ impl WebSocketClientBuilder {
         connection_tx: Box<dyn ConnectionTx>,
         connection_rx: Box<dyn ConnectionRx>,
         response: &Response,
+        trailer: Vec<u8>,
         max_frame_size: Option<usize>,
     ) -> Result<WebSocket, Error> {
         match response {
@@ -173,6 +175,7 @@ impl WebSocketClientBuilder {
                 connection_tx,
                 connection_rx,
                 MaskDirection::Transmit,
+                trailer,
                 max_frame_size,
             )),
         }
@@ -238,6 +241,7 @@ mod tests {
                 Box::new(connection_tx),
                 Box::new(connection_rx),
                 &response,
+                Vec::new(),
                 None,
             ),
             Err(Error::ProtocolNotUpgradedToWebSocket)
@@ -265,6 +269,7 @@ mod tests {
                 Box::new(connection_tx),
                 Box::new(connection_rx),
                 &response,
+                Vec::new(),
                 None,
             ),
             Err(Error::ProtocolNotUpgradedToWebSocket)
@@ -291,6 +296,7 @@ mod tests {
                 Box::new(connection_tx),
                 Box::new(connection_rx),
                 &response,
+                Vec::new(),
                 None,
             ),
             Err(Error::ConnectionNotUpgraded)
@@ -318,6 +324,7 @@ mod tests {
                 Box::new(connection_tx),
                 Box::new(connection_rx),
                 &response,
+                Vec::new(),
                 None,
             ),
             Err(Error::ConnectionNotUpgraded)
@@ -338,6 +345,7 @@ mod tests {
                 Box::new(connection_tx),
                 Box::new(connection_rx),
                 &response,
+                Vec::new(),
                 None,
             ),
             Err(Error::InvalidHandshakeResponse)
@@ -365,6 +373,7 @@ mod tests {
                 Box::new(connection_tx),
                 Box::new(connection_rx),
                 &response,
+                Vec::new(),
                 None,
             ),
             Err(Error::InvalidHandshakeResponse)
@@ -393,6 +402,7 @@ mod tests {
                 Box::new(connection_tx),
                 Box::new(connection_rx),
                 &response,
+                Vec::new(),
                 None,
             ),
             Err(Error::ExtensionNotRequested)
@@ -421,6 +431,7 @@ mod tests {
                 Box::new(connection_tx),
                 Box::new(connection_rx),
                 &response,
+                Vec::new(),
                 None,
             )
             .is_ok());
@@ -448,6 +459,7 @@ mod tests {
                 Box::new(connection_tx),
                 Box::new(connection_rx),
                 &response,
+                Vec::new(),
                 None,
             ),
             Err(Error::SubprotocolNotRequested)
@@ -476,6 +488,7 @@ mod tests {
                 Box::new(connection_tx),
                 Box::new(connection_rx),
                 &response,
+                Vec::new(),
                 None,
             )
             .is_ok());
@@ -506,6 +519,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             &response,
+            Vec::new(),
             None,
         );
         assert!(open_result.is_ok());

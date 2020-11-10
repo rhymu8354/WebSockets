@@ -245,6 +245,7 @@ async fn receive_bytes(
 
 async fn receive_frames(
     connection_rx: Box<dyn ConnectionRx>,
+    trailer: Vec<u8>,
     received_messages: StreamMessageSender,
     max_frame_size: Option<usize>,
     mask_direction: MaskDirection,
@@ -253,6 +254,7 @@ async fn receive_frames(
 ) {
     if let Err(error) = try_receive_frames(
         connection_rx,
+        trailer,
         &received_messages,
         max_frame_size,
         mask_direction,
@@ -273,6 +275,7 @@ async fn receive_frames(
 
 async fn try_receive_frames(
     mut connection_rx: Box<dyn ConnectionRx>,
+    trailer: Vec<u8>,
     received_messages: &StreamMessageSender,
     max_frame_size: Option<usize>,
     mask_direction: MaskDirection,
@@ -281,8 +284,8 @@ async fn try_receive_frames(
 ) -> Result<(), Error> {
     let mut frame_receiver =
         FrameReceiver::new(mask_direction, frame_sender, received_messages);
-    let mut frame_reassembly_buffer = Vec::new();
-    let mut need_more_input = true;
+    let mut frame_reassembly_buffer = trailer;
+    let mut need_more_input = frame_reassembly_buffer.is_empty();
     let mut read_chunk_size = INITIAL_READ_CHUNK_SIZE;
     loop {
         // Wait for more data to arrive, if we need more input.
@@ -362,6 +365,7 @@ async fn worker(
     received_messages: StreamMessageSender,
     connection_tx: Box<dyn ConnectionTx>,
     connection_rx: Box<dyn ConnectionRx>,
+    trailer: Vec<u8>,
     mask_direction: MaskDirection,
     max_frame_size: Option<usize>,
 ) {
@@ -376,6 +380,7 @@ async fn worker(
         handle_messages(work_in_receiver, &frame_sender);
     let receive_frames_future = receive_frames(
         connection_rx,
+        trailer,
         received_messages,
         max_frame_size,
         mask_direction,
@@ -507,6 +512,7 @@ impl WebSocket {
         connection_tx: Box<dyn ConnectionTx>,
         connection_rx: Box<dyn ConnectionRx>,
         mask_direction: MaskDirection,
+        trailer: Vec<u8>,
         max_frame_size: Option<usize>,
     ) -> Self {
         // Make the channel used to communicate with the worker thread.
@@ -530,6 +536,7 @@ impl WebSocket {
                     stream_message_sender,
                     connection_tx,
                     connection_rx,
+                    trailer,
                     mask_direction,
                     max_frame_size,
                 ))
@@ -720,6 +727,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            Vec::new(),
             None,
         );
         assert!(ws.ping("Hello").is_ok());
@@ -738,6 +746,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            Vec::new(),
             None,
         );
         assert!(ws.ping("").is_ok());
@@ -756,6 +765,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            Vec::new(),
             None,
         );
         assert!(ws.ping("x".repeat(125)).is_ok());
@@ -776,6 +786,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            Vec::new(),
             None,
         );
         assert!(matches!(
@@ -798,6 +809,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Transmit,
+            Vec::new(),
             None,
         );
         let connection_back_tx = &RefCell::new(connection_back_tx);
@@ -855,6 +867,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Transmit,
+            Vec::new(),
             None,
         );
         let reader = async {
@@ -889,6 +902,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            Vec::new(),
             None,
         );
         assert!(ws.text("Hello, World!", LastFragment::Yes).is_ok());
@@ -907,6 +921,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Transmit,
+            Vec::new(),
             None,
         );
         let reader = async {
@@ -941,6 +956,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            Vec::new(),
             None,
         );
         assert!(ws
@@ -961,6 +977,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Transmit,
+            Vec::new(),
             None,
         );
         let reader = async {
@@ -995,6 +1012,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Transmit,
+            Vec::new(),
             None,
         );
         let data = "Hello, World!";
@@ -1023,6 +1041,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            Vec::new(),
             None,
         );
         let reader = async {
@@ -1069,6 +1088,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            Vec::new(),
             None,
         );
         assert!(ws.text("Hello,", LastFragment::No).is_ok());
@@ -1110,6 +1130,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            Vec::new(),
             None,
         );
         assert!(ws.binary(&b"Hello,"[..], LastFragment::No).is_ok());
@@ -1151,6 +1172,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Transmit,
+            Vec::new(),
             None,
         );
         let reader = async {
@@ -1188,6 +1210,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            Vec::new(),
             None,
         );
         let (mut sink, stream) = ws.split();
@@ -1252,6 +1275,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            Vec::new(),
             None,
         );
         let (mut sink, stream) = ws.split();
@@ -1358,6 +1382,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            Vec::new(),
             None,
         );
         let (sink, stream) = ws.split();
@@ -1442,6 +1467,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            Vec::new(),
             None,
         );
         let connection_back_rx = RefCell::new(connection_back_rx);
@@ -1489,6 +1515,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            Vec::new(),
             None,
         );
         let connection_back_rx = RefCell::new(connection_back_rx);
@@ -1536,6 +1563,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            Vec::new(),
             None,
         );
         let connection_back_rx = RefCell::new(connection_back_rx);
@@ -1584,6 +1612,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            Vec::new(),
             None,
         );
         let connection_back_rx = RefCell::new(connection_back_rx);
@@ -1632,6 +1661,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            Vec::new(),
             None,
         );
         let connection_back_rx = RefCell::new(connection_back_rx);
@@ -1679,6 +1709,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            Vec::new(),
             None,
         );
         let connection_back_rx = RefCell::new(connection_back_rx);
@@ -1726,6 +1757,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Transmit,
+            Vec::new(),
             None,
         );
         let connection_back_rx = RefCell::new(connection_back_rx);
@@ -1779,6 +1811,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            Vec::new(),
             None,
         );
         let connection_back_rx = RefCell::new(connection_back_rx);
@@ -1827,6 +1860,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            Vec::new(),
             None,
         );
         let connection_back_rx = RefCell::new(connection_back_rx);
@@ -1893,6 +1927,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Transmit,
+            Vec::new(),
             None,
         );
         let connection_back_rx = RefCell::new(connection_back_rx);
@@ -1933,6 +1968,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Transmit,
+            Vec::new(),
             None,
         );
         let connection_back_rx = RefCell::new(connection_back_rx);
@@ -1981,6 +2017,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            Vec::new(),
             None,
         );
         let connection_back_rx = RefCell::new(connection_back_rx);
@@ -2041,6 +2078,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Transmit,
+            Vec::new(),
             Some(7),
         );
         let connection_back_rx = RefCell::new(connection_back_rx);
@@ -2085,6 +2123,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Transmit,
+            Vec::new(),
             Some(7),
         );
         let connection_back_rx = RefCell::new(connection_back_rx);
@@ -2129,6 +2168,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Transmit,
+            Vec::new(),
             Some(7),
         );
         let connection_back_rx = RefCell::new(connection_back_rx);
@@ -2171,6 +2211,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Transmit,
+            Vec::new(),
             Some(7),
         );
         let connection_back_rx = RefCell::new(connection_back_rx);
@@ -2213,6 +2254,7 @@ mod tests {
             Box::new(connection_tx),
             Box::new(connection_rx),
             MaskDirection::Receive,
+            Vec::new(),
             None,
         );
         assert!(matches!(

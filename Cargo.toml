@@ -21,8 +21,10 @@ base64 = "0.13"
 futures = "0.3"
 rand = "0.7"
 sha1 = "0.6"
-rhymuweb = { path = "../Http" }
+rhymuweb = "1.0"
 thiserror = "1.0"
 
 [dev-dependencies]
 futures-timer = "3.0"
+rhymuri = "1.1"
+rhymuweb-client = { path = "../HttpClient" }
