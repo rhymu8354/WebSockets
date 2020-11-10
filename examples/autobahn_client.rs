@@ -223,5 +223,5 @@ where
 }
 
 fn main() -> Result<(), Error> {
-    executor::block_on(run_tests("ws://cheetah.local:9001", "rhymu-websocket"))
+    executor::block_on(run_tests("ws://192.168.0.221:9001", "rhymu-websocket"))
 }
