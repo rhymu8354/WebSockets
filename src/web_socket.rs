@@ -484,6 +484,8 @@ impl WebSocket {
     ) -> Result<WorkerMessage, Error> {
         if reason.len() + 2 > MAX_CONTROL_FRAME_DATA_LENGTH {
             Err(Error::FramePayloadTooLarge)
+        } else if code == 1005 {
+            Err(Error::BadCloseCode)
         } else {
             self.close_sent = true;
             Ok(WorkerMessage::Send {
@@ -2375,5 +2377,28 @@ mod tests {
         let output = output.unwrap();
         assert_eq!(6, output.len());
         assert_eq!(b"\x88\x80"[..], output[0..2]);
+    }
+
+    #[test]
+    fn send_close_code_1005_explicitly() {
+        let (connection_tx, _connection_back_tx) = mock_connection::Tx::new();
+        let (connection_rx, _connection_back_rx) = mock_connection::Rx::new();
+        let mut ws = WebSocket::new(
+            Box::new(connection_tx),
+            Box::new(connection_rx),
+            MaskDirection::Receive,
+            Vec::new(),
+            None,
+        );
+        assert!(matches!(
+            executor::block_on(async {
+                ws.send(SinkMessage::Close {
+                    code: 1005,
+                    reason: String::new(),
+                })
+                .await
+            }),
+            Err(Error::BadCloseCode)
+        ));
     }
 }

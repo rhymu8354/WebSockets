@@ -119,4 +119,9 @@ pub enum Error {
     /// is already closed.
     #[error("WebSocket is already closed")]
     Closed,
+
+    /// This indicates the user tried to send an illegal code
+    /// in an outgoing `close` Frame.
+    #[error("invalid code given for close frame")]
+    BadCloseCode,
 }
