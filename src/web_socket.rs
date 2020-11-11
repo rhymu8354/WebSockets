@@ -228,7 +228,7 @@ async fn receive_bytes(
     connection_rx: &mut dyn ConnectionRx,
     frame_reassembly_buffer: &mut Vec<u8>,
     read_chunk_size: usize,
-) -> Result<(), Error> {
+) -> Result<usize, Error> {
     let left_over = frame_reassembly_buffer.len();
     frame_reassembly_buffer.resize(left_over + read_chunk_size, 0);
     let received = connection_rx
@@ -240,7 +240,7 @@ async fn receive_bytes(
             received => Ok(received),
         })?;
     frame_reassembly_buffer.truncate(left_over + received);
-    Ok(())
+    Ok(received)
 }
 
 async fn receive_frames(
@@ -290,16 +290,13 @@ async fn try_receive_frames(
     loop {
         // Wait for more data to arrive, if we need more input.
         if need_more_input {
-            receive_bytes(
+            read_chunk_size = receive_bytes(
                 &mut connection_rx,
                 &mut frame_reassembly_buffer,
                 read_chunk_size,
             )
-            .await?;
-
-            // If we need more data, double the amount of free space to arrange
-            // in the frame reassembly buffer for receiving more data.
-            read_chunk_size *= 2;
+            .await?
+                * 2;
         }
 
         // Until we recover a whole frame, assume we need to read more data.
