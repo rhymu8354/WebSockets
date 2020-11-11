@@ -3,7 +3,6 @@ use futures::{
     AsyncReadExt,
     SinkExt,
     StreamExt,
-    TryStreamExt,
 };
 use rhymuri::Uri;
 use rhymuweb::Response;
