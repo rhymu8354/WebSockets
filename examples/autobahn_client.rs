@@ -156,9 +156,13 @@ where
                 } => {
                     let _ = sink
                         .borrow_mut()
-                        .send(websockets::SinkMessage::Close {
-                            code,
-                            reason,
+                        .send(if code == 1005 {
+                            websockets::SinkMessage::CloseNoStatus
+                        } else {
+                            websockets::SinkMessage::Close {
+                                code,
+                                reason,
+                            }
                         })
                         .await;
                     let _ = sink.borrow_mut().close().await;
