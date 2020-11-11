@@ -183,6 +183,20 @@ impl<'a> FrameReceiver<'a> {
         let mut reason = String::new();
         if payload.len() >= 2 {
             code = ((payload[0] as usize) << 8) + (payload[1] as usize);
+            if !matches!(
+                code,
+                1000 | 1001
+                    | 1002
+                    | 1003
+                    | 1007
+                    | 1008
+                    | 1009
+                    | 1010
+                    | 1011
+                    | 3000..=4999
+            ) {
+                return Err(Error::BadFrame("illegal close code"));
+            }
             reason = String::from(std::str::from_utf8(&payload[2..]).map_err(
                 |source| Error::Utf8 {
                     source,
