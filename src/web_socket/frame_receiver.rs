@@ -44,7 +44,7 @@ impl<'a> FrameReceiver<'a> {
 
     pub async fn receive_frame(
         &mut self,
-        frame_reassembly_buffer: &[u8],
+        frame_reassembly_buffer: &mut [u8],
         header_length: usize,
         payload_length: usize,
     ) -> Result<ReceivedCloseFrame, Error> {
@@ -90,16 +90,18 @@ impl<'a> FrameReceiver<'a> {
         }
 
         // Recover the payload from the frame, applying the mask if necessary.
-        let mut payload = frame_reassembly_buffer
-            [header_length..header_length + payload_length]
-            .to_vec();
         if mask {
-            let mask_bytes =
-                &frame_reassembly_buffer[header_length - 4..header_length];
+            let mask_bytes = frame_reassembly_buffer
+                [header_length - 4..header_length]
+                .to_vec();
+            let payload = &mut frame_reassembly_buffer
+                [header_length..header_length + payload_length];
             payload.iter_mut().zip(mask_bytes.iter().cycle()).for_each(
                 |(payload_byte, &mask_byte)| *payload_byte ^= mask_byte,
             );
         }
+        let payload = &mut frame_reassembly_buffer
+            [header_length..header_length + payload_length];
 
         // Interpret the payload depending on the opcode.
         match opcode {
@@ -140,7 +142,7 @@ impl<'a> FrameReceiver<'a> {
                 }
                 let _ = self
                     .received_messages
-                    .unbounded_send(StreamMessage::Pong(payload));
+                    .unbounded_send(StreamMessage::Pong(payload.into()));
                 Ok(ReceivedCloseFrame::No)
             },
 
@@ -158,10 +160,10 @@ impl<'a> FrameReceiver<'a> {
 
     async fn receive_frame_binary(
         &mut self,
-        mut payload: Vec<u8>,
+        payload: &[u8],
         fin: bool,
     ) -> Result<(), Error> {
-        self.message_reassembly_buffer.append(&mut payload);
+        self.message_reassembly_buffer.extend(payload);
         self.message_in_progress = if fin {
             let mut message = Vec::new();
             std::mem::swap(&mut message, &mut self.message_reassembly_buffer);
@@ -177,7 +179,7 @@ impl<'a> FrameReceiver<'a> {
 
     async fn receive_frame_close(
         &mut self,
-        payload: Vec<u8>,
+        payload: &[u8],
     ) -> Result<(), Error> {
         let mut code = 1005;
         let mut reason = String::new();
@@ -213,7 +215,7 @@ impl<'a> FrameReceiver<'a> {
 
     async fn receive_frame_continuation(
         &mut self,
-        payload: Vec<u8>,
+        payload: &[u8],
         fin: bool,
     ) -> Result<(), Error> {
         match self.message_in_progress {
@@ -229,14 +231,18 @@ impl<'a> FrameReceiver<'a> {
         }
     }
 
-    async fn receive_frame_ping(
+    async fn receive_frame_ping<T>(
         &mut self,
-        payload: Vec<u8>,
-    ) -> Result<(), Error> {
+        payload: T,
+    ) -> Result<(), Error>
+    where
+        T: Into<Vec<u8>>,
+    {
+        let payload = payload.into();
         self.frame_sender
             .lock()
             .await
-            .send_frame(SetFin::Yes, OPCODE_PONG, payload.clone())
+            .send_frame(SetFin::Yes, OPCODE_PONG, &payload)
             .await?;
         let _ =
             self.received_messages.unbounded_send(StreamMessage::Ping(payload));
@@ -245,10 +251,10 @@ impl<'a> FrameReceiver<'a> {
 
     async fn receive_frame_text(
         &mut self,
-        mut payload: Vec<u8>,
+        payload: &[u8],
         fin: bool,
     ) -> Result<(), Error> {
-        self.message_reassembly_buffer.append(&mut payload);
+        self.message_reassembly_buffer.extend(payload);
         self.message_in_progress = if fin {
             let message = std::str::from_utf8(&self.message_reassembly_buffer)
                 .map_err(|source| Error::Utf8 {

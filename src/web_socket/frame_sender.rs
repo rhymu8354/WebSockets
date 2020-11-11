@@ -43,7 +43,7 @@ impl FrameSender {
         &mut self,
         set_fin: SetFin,
         opcode: u8,
-        mut payload: Vec<u8>,
+        payload: &[u8],
     ) -> Result<(), Error> {
         // Do not send anything after sending "CLOSE".
         if self.close_sent.is_none() {
@@ -91,7 +91,7 @@ impl FrameSender {
         // Add the payload.  If masking, we need to generate a random mask
         // and XOR the payload with it.
         if mask == 0 {
-            frame.append(&mut payload);
+            frame.extend(payload);
         } else {
             // Generate a random mask (4 bytes).
             let mut masking_key = [0; 4];
@@ -140,6 +140,6 @@ impl FrameSender {
             payload.extend(reason.as_bytes());
             payload
         };
-        let _ = self.send_frame(SetFin::Yes, OPCODE_CLOSE, payload).await;
+        let _ = self.send_frame(SetFin::Yes, OPCODE_CLOSE, &payload).await;
     }
 }

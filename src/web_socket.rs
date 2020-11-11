@@ -206,7 +206,7 @@ async fn handle_message(
         } => frame_sender
             .lock()
             .await
-            .send_frame(set_fin, opcode, data)
+            .send_frame(set_fin, opcode, &data)
             .await
             .map_err(|_| ()),
     }
@@ -329,7 +329,7 @@ async fn try_receive_frames(
             }
             if let ReceivedCloseFrame::Yes = frame_receiver
                 .receive_frame(
-                    &frame_reassembly_buffer[0..frame_length],
+                    &mut frame_reassembly_buffer[0..frame_length],
                     header_length,
                     payload_length,
                 )
