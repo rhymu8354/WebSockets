@@ -14,6 +14,7 @@ use std::{
     cell::RefCell,
     error::Error as _,
 };
+use structopt::StructOpt;
 use websockets::{
     WebSocket,
     WebSocketClientBuilder,
@@ -200,17 +201,17 @@ where
     Ok(())
 }
 
-async fn run_tests<T>(
-    base_url: T,
-    agent: T,
+async fn run_tests<T1, T2>(
+    base_url: T1,
+    agent: T2,
 ) -> Result<(), Error>
 where
-    T: AsRef<str>,
+    T1: AsRef<str>,
+    T2: AsRef<str>,
 {
     let client = HttpClient::new();
     let base_url = base_url.as_ref();
     let cases = get_case_count(&client, base_url).await?;
-    // let cases = 220;
     println!("There are {} test cases enabled in the fuzzserver.", cases);
     let agent = agent.as_ref();
     for case in 1..=cases {
@@ -226,6 +227,14 @@ where
     Ok(())
 }
 
+#[derive(Clone, StructOpt)]
+struct Opts {
+    /// Base URI of the autobahn testsuite fuzzserver
+    #[structopt(default_value = "ws://192.168.0.221:9001")]
+    base_uri: String,
+}
+
 fn main() -> Result<(), Error> {
-    executor::block_on(run_tests("ws://192.168.0.221:9001", "rhymu-websocket"))
+    let opts: Opts = Opts::from_args();
+    executor::block_on(run_tests(opts.base_uri, "rhymu-websocket"))
 }
