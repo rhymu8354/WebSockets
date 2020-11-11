@@ -2317,4 +2317,63 @@ mod tests {
             ))
         );
     }
+
+    #[test]
+    fn receive_close_no_payload() {
+        let (connection_tx, mut connection_back_tx) =
+            mock_connection::Tx::new();
+        let (connection_rx, connection_back_rx) = mock_connection::Rx::new();
+        let ws = WebSocket::new(
+            Box::new(connection_tx),
+            Box::new(connection_rx),
+            MaskDirection::Transmit,
+            Vec::new(),
+            None,
+        );
+        let connection_back_rx = RefCell::new(connection_back_rx);
+        let (sink, stream) = ws.split();
+        let sink = RefCell::new(sink);
+        let reader = async {
+            stream
+                .fold(false, |_, message| async {
+                    match message {
+                        StreamMessage::Close {
+                            code,
+                            reason,
+                        } => {
+                            // Check that the code and reason are correct.
+                            assert_eq!(1005, code);
+                            assert_eq!("", reason);
+
+                            // Send back a close.
+                            // TODO: We might want WebSocket to do this for us?
+                            let _ = sink
+                                .borrow_mut()
+                                .send(SinkMessage::CloseNoStatus)
+                                .await;
+
+                            // Now the we're done, we can close the connection.
+                            // connection_back_rx.borrow_mut().close().await;
+                            true
+                        },
+
+                        _ => panic!("we got something that isn't a close!"),
+                    }
+                })
+                .await
+        };
+        connection_back_rx.borrow_mut().web_socket_input(&b"\x88\x00"[..]);
+        assert_eq!(
+            Ok(true),
+            executor::block_on(timeout(
+                REASONABLE_FAST_OPERATION_TIMEOUT,
+                reader,
+            ))
+        );
+        let output = connection_back_tx.web_socket_output();
+        assert!(output.is_some());
+        let output = output.unwrap();
+        assert_eq!(6, output.len());
+        assert_eq!(b"\x88\x80"[..], output[0..2]);
+    }
 }
