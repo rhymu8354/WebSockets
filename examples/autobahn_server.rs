@@ -218,7 +218,8 @@ async fn run_tests(port: u16) -> Result<(), Error> {
 
 #[derive(Clone, StructOpt)]
 struct Opts {
-    /// Base URI of the autobahn testsuite fuzzserver
+    /// TCP port on which to listen for incoming connections from the autobahn
+    /// testsuite fuzzclient
     #[structopt(default_value = "9002")]
     port: u16,
 }
