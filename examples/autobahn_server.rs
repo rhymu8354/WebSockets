@@ -119,7 +119,7 @@ async fn worker(receiver: mpsc::UnboundedReceiver<WebSocket>) {
             futures.push(Box::pin(next_ws));
             needs_receiver_future = false;
         }
-        let futures_in = std::mem::take(&mut futures);
+        let futures_in = futures;
         let (work_kind, _, mut futures_remaining) =
             future::select_all(futures_in).await;
         match work_kind {
