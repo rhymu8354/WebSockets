@@ -186,7 +186,7 @@ async fn run_test(
     port: u16,
     sender: mpsc::UnboundedSender<WebSocket>,
 ) -> Result<(), Error> {
-    let mut server = HttpServer::new();
+    let mut server = HttpServer::new("rhymu-websockets");
     let sender_for_factory = sender.clone();
     server.register(
         &[b"".to_vec()][..],
