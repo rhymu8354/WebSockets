@@ -44,60 +44,6 @@ fn compute_key_answer(key: Option<&str>) -> Result<String, Error> {
     })
 }
 
-pub fn open_server(
-    connection_tx: Box<dyn ConnectionTx>,
-    connection_rx: Box<dyn ConnectionRx>,
-    request: &Request,
-    max_frame_size: Option<usize>,
-) -> Result<(WebSocket, Response), Error> {
-    match request {
-        _ if request.method != "GET" => Err(Error::WrongHttpMethod),
-        _ if !request.headers.has_header_token("Connection", "upgrade") => {
-            Err(Error::UpgradeNotRequested)
-        },
-        _ if !matches!(
-            request.headers.header_value("Upgrade"),
-            Some(value) if value.eq_ignore_ascii_case("websocket")
-        ) =>
-        {
-            Err(Error::ProtocolUpgradeRequestNotAWebSocket)
-        },
-        _ if !matches!(
-            request.headers.header_value("Sec-WebSocket-Version"),
-            Some(value) if value == CURRENTLY_SUPPORTED_WEBSOCKET_VERSION
-        ) =>
-        {
-            Err(Error::UnsupportedProtocolVersion)
-        },
-        _ => {
-            let mut response = Response::new();
-            response.status_code = 101;
-            response.reason_phrase = "Switching Protocols".into();
-            response.headers.set_header("Connection", "upgrade");
-            response.headers.set_header("Upgrade", "websocket");
-            response.headers.set_header(
-                "Sec-WebSocket-Accept",
-                compute_key_answer(
-                    request
-                        .headers
-                        .header_value("Sec-WebSocket-Key")
-                        .as_deref(),
-                )?,
-            );
-            Ok((
-                WebSocket::new(
-                    connection_tx,
-                    connection_rx,
-                    MaskDirection::Receive,
-                    Vec::new(),
-                    max_frame_size,
-                ),
-                response,
-            ))
-        },
-    }
-}
-
 type HandshakeKey = String;
 
 // WebSocket internally is either a client or server, because
@@ -191,7 +137,65 @@ impl WebSocketServerBuilder {
         request: &Request,
         max_frame_size: Option<usize>,
     ) -> Result<(WebSocket, Response), Error> {
-        open_server(connection_tx, connection_rx, request, max_frame_size)
+        let response = Self::start_open(request)?;
+        Ok((
+            Self::finish_open(connection_tx, connection_rx, max_frame_size),
+            response,
+        ))
+    }
+
+    pub fn start_open(request: &Request) -> Result<Response, Error> {
+        match request {
+            _ if request.method != "GET" => Err(Error::WrongHttpMethod),
+            _ if !request.headers.has_header_token("Connection", "upgrade") => {
+                Err(Error::UpgradeNotRequested)
+            },
+            _ if !matches!(
+                request.headers.header_value("Upgrade"),
+                Some(value) if value.eq_ignore_ascii_case("websocket")
+            ) =>
+            {
+                Err(Error::ProtocolUpgradeRequestNotAWebSocket)
+            },
+            _ if !matches!(
+                request.headers.header_value("Sec-WebSocket-Version"),
+                Some(value) if value == CURRENTLY_SUPPORTED_WEBSOCKET_VERSION
+            ) =>
+            {
+                Err(Error::UnsupportedProtocolVersion)
+            },
+            _ => {
+                let mut response = Response::new();
+                response.status_code = 101;
+                response.reason_phrase = "Switching Protocols".into();
+                response.headers.set_header("Connection", "upgrade");
+                response.headers.set_header("Upgrade", "websocket");
+                response.headers.set_header(
+                    "Sec-WebSocket-Accept",
+                    compute_key_answer(
+                        request
+                            .headers
+                            .header_value("Sec-WebSocket-Key")
+                            .as_deref(),
+                    )?,
+                );
+                Ok(response)
+            },
+        }
+    }
+
+    pub fn finish_open(
+        connection_tx: Box<dyn ConnectionTx>,
+        connection_rx: Box<dyn ConnectionRx>,
+        max_frame_size: Option<usize>,
+    ) -> WebSocket {
+        WebSocket::new(
+            connection_tx,
+            connection_rx,
+            MaskDirection::Receive,
+            Vec::new(),
+            max_frame_size,
+        )
     }
 }
 
@@ -543,7 +547,7 @@ mod tests {
     }
 
     #[test]
-    fn complete_open_as_server() {
+    fn complete_open_as_server_single_call() {
         // Construct handshake request.
         let mut request = Request::new();
         request.method = "GET".into();
@@ -577,6 +581,55 @@ mod tests {
         assert_eq!(
             Some("s3pPLMBiTxaQ9kYGzzhZRbK+xOo="),
             response.headers.header_value("Sec-WebSocket-Accept").as_deref()
+        );
+
+        // Use the WebSocket to confirm it's using the connection
+        // that we gave to the builder.
+        assert!(ws.ping("Hello").is_ok());
+        assert_eq!(
+            Some(&b"\x89\x05Hello"[..]),
+            back_end_tx.web_socket_output().as_deref()
+        );
+    }
+
+    #[test]
+    fn complete_open_as_server_two_calls() {
+        // Construct handshake request.
+        let mut request = Request::new();
+        request.method = "GET".into();
+        request.headers.set_header("Connection", "upgrade");
+        request.headers.set_header("Upgrade", "websocket");
+        request.headers.set_header("Sec-WebSocket-Version", "13");
+        request
+            .headers
+            .set_header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==");
+
+        // Start the server-side handshake, obtaining the response for
+        // the request we built.
+        let open_result = WebSocketServerBuilder::start_open(&request);
+        assert!(open_result.is_ok());
+        let response = open_result.unwrap();
+
+        // Verify the response.
+        assert_eq!(101, response.status_code);
+        assert_eq!("Switching Protocols", response.reason_phrase);
+        assert_eq!(
+            Some("websocket"),
+            response.headers.header_value("Upgrade").as_deref()
+        );
+        assert!(response.headers.has_header_token("Connection", "upgrade"));
+        assert_eq!(
+            Some("s3pPLMBiTxaQ9kYGzzhZRbK+xOo="),
+            response.headers.header_value("Sec-WebSocket-Accept").as_deref()
+        );
+
+        // Complete the server-side handshake to obtain the built WebSocket.
+        let (connection_tx, mut back_end_tx) = mock_connection::Tx::new();
+        let (connection_rx, _back_end_rx) = mock_connection::Rx::new();
+        let mut ws = WebSocketServerBuilder::finish_open(
+            Box::new(connection_tx),
+            Box::new(connection_rx),
+            None,
         );
 
         // Use the WebSocket to confirm it's using the connection

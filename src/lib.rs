@@ -12,7 +12,6 @@ mod vec_ext;
 mod web_socket;
 
 pub use builders::{
-    open_server,
     WebSocketClientBuilder,
     WebSocketServerBuilder,
 };
