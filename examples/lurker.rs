@@ -8,8 +8,6 @@ use futures::{
     future::FutureExt,
     select,
     AsyncReadExt,
-    AsyncWriteExt,
-    Sink,
     SinkExt,
     StreamExt,
 };
