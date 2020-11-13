@@ -29,6 +29,7 @@ anyhow = "1.0"
 async-ctrlc = "1.2"
 async-std = "1.7"
 futures-timer = "3.0"
+rand = "0.7"
 rhymuri = "1.1"
 rhymuweb-client = { path = "../HttpClient" }
 rhymuweb-server = { path = "../HttpServer" }
