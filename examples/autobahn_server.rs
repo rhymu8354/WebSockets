@@ -45,7 +45,10 @@ enum WorkKind {
     },
 }
 
-async fn serve_websocket(ws: WebSocket) -> WorkKind {
+async fn serve_websocket(
+    ws: WebSocket,
+    ws_count: usize,
+) -> WorkKind {
     let (sink, stream) = ws.split();
     let sink = &RefCell::new(sink);
     stream
@@ -91,6 +94,7 @@ async fn serve_websocket(ws: WebSocket) -> WorkKind {
             }
         })
         .await;
+    println!("WebSocket #{} was closed", ws_count);
     WorkKind::WebSocket
 }
 
@@ -132,7 +136,7 @@ async fn worker(receiver: mpsc::UnboundedReceiver<WebSocket>) {
                     println!("Now serving WebSocket #{}", ws_count);
                     needs_receiver_future = true;
                     receiver.replace(receiver_out);
-                    let ws_future = serve_websocket(ws);
+                    let ws_future = serve_websocket(ws, ws_count);
                     futures_remaining.push(Box::pin(ws_future));
                 } else {
                     println!("All done serving WebSockets.  kthxbye");
