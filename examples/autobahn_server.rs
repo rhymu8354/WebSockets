@@ -194,8 +194,7 @@ async fn run_test(
             handle_test_factory(request, connection, sender_for_factory.clone())
         }),
     );
-    let server_result =
-        server.start(port, std::convert::identity).await.map_err(Error::Http);
+    let server_result = server.start(port).await.map_err(Error::Http);
     CtrlC::new().unwrap().await;
     sender.close_channel();
     drop(server);
