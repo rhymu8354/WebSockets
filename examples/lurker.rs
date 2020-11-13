@@ -34,23 +34,36 @@ struct Opts {
     channel: String,
 }
 
-fn handle_incoming_message(message: WebSocketStreamMessage) -> bool {
+enum MessageTypeReceived {
+    Chat,
+    Close,
+    None,
+    Ping,
+    Unknown,
+}
+
+fn handle_incoming_message(
+    message: WebSocketStreamMessage
+) -> MessageTypeReceived {
     match message {
         WebSocketStreamMessage::Text(message) => {
-            println!("*** They said: {}", message.trim());
-        },
-        WebSocketStreamMessage::Binary(_) => {
-            println!("*** They said something in binary.");
+            let message = message.trim();
+            if message == "PING :tmi.twitch.tv" {
+                println!("*** Twitch PINGed us!  How could they?!");
+                MessageTypeReceived::Ping
+            } else {
+                println!("*** Chat said: {}", message);
+                MessageTypeReceived::Chat
+            }
         },
         WebSocketStreamMessage::Close {
             ..
         } => {
             println!("*** Close received");
-            return true;
+            MessageTypeReceived::Close
         },
-        _ => {},
+        _ => MessageTypeReceived::Unknown,
     }
-    false
 }
 
 // TODO: There are problems using this from `use_websocket` that I'll
@@ -108,7 +121,7 @@ where
     loop {
         line.clear();
         let stdin_reader = async { stdin.read_line(&mut line).await }.boxed();
-        let close = futures::select! {
+        match futures::select! {
             written = stdin_reader.fuse() => {
                 let _ = written?;
                 let line = line.trim();
@@ -118,22 +131,33 @@ where
                     last_fragment: WebSocketLastFragment::Yes,
                 })
                 .await?;
-                false
+                MessageTypeReceived::None
             },
 
             message = ws_stream.next().fuse() => match message {
                 Some(message) => handle_incoming_message(message),
                 None => break Ok(()),
             },
-        };
-        if close {
-            println!("*** Sending close");
-            ws_sink
-                .send(WebSocketSinkMessage::Close {
-                    code: 1000,
-                    reason: String::from("thanks for all the fish"),
-                })
-                .await?;
+        } {
+            MessageTypeReceived::Ping => {
+                println!("*** Sending PONG text message");
+                ws_sink
+                    .send(WebSocketSinkMessage::Text {
+                        payload: String::from("PONG :tmi.twitch.tv"),
+                        last_fragment: WebSocketLastFragment::Yes,
+                    })
+                    .await?;
+            },
+            MessageTypeReceived::Close => {
+                println!("*** Sending close");
+                ws_sink
+                    .send(WebSocketSinkMessage::Close {
+                        code: 1000,
+                        reason: String::from("thanks for all the fish"),
+                    })
+                    .await?;
+            },
+            _ => {},
         }
     }
 }
