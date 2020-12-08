@@ -3,10 +3,11 @@ use futures::{
     channel::mpsc,
     executor,
     future,
+    future::LocalBoxFuture,
     AsyncReadExt,
-    FutureExt,
-    SinkExt,
-    StreamExt,
+    FutureExt as _,
+    SinkExt as _,
+    StreamExt as _,
 };
 use rhymuweb::{
     Request,
@@ -21,7 +22,6 @@ use rhymuweb_server::{
 use std::{
     cell::RefCell,
     error::Error as _,
-    pin::Pin,
     sync::Arc,
     thread,
 };
@@ -110,8 +110,7 @@ async fn handle_receiver(
 }
 
 async fn worker(receiver: mpsc::UnboundedReceiver<WebSocket>) {
-    let mut futures: Vec<Pin<Box<dyn futures::Future<Output = WorkKind>>>> =
-        Vec::new();
+    let mut futures: Vec<LocalBoxFuture<WorkKind>> = Vec::new();
     let mut receiver = Some(receiver);
     let mut ws_count = 0;
     loop {
