@@ -112,16 +112,12 @@ async fn handle_receiver(
 async fn worker(receiver: mpsc::UnboundedReceiver<WebSocket>) {
     let mut futures: Vec<Pin<Box<dyn futures::Future<Output = WorkKind>>>> =
         Vec::new();
-    let mut needs_receiver_future = true;
     let mut receiver = Some(receiver);
     let mut ws_count = 0;
     loop {
-        if needs_receiver_future {
-            let next_ws = handle_receiver(
-                receiver.take().expect("we dropped the receiver"),
-            );
+        if let Some(receiver) = receiver.take() {
+            let next_ws = handle_receiver(receiver);
             futures.push(Box::pin(next_ws));
-            needs_receiver_future = false;
         }
         let futures_in = futures;
         let (work_kind, _, mut futures_remaining) =
@@ -134,7 +130,6 @@ async fn worker(receiver: mpsc::UnboundedReceiver<WebSocket>) {
                 if let Some(ws) = ws {
                     ws_count += 1;
                     println!("Now serving WebSocket #{}", ws_count);
-                    needs_receiver_future = true;
                     receiver.replace(receiver_out);
                     let ws_future = serve_websocket(ws, ws_count);
                     futures_remaining.push(Box::pin(ws_future));
