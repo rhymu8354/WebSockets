@@ -125,17 +125,10 @@ pub enum ReceivedCloseFrame {
 type StreamMessageSender = mpsc::UnboundedSender<StreamMessage>;
 type StreamMessageReceiver = mpsc::UnboundedReceiver<StreamMessage>;
 
-enum WorkerMessage {
-    // This tells the worker thread to terminate.
-    Exit,
-
-    // This tells the worker thread to send the given frame through
-    // the connection.
-    Send {
-        set_fin: SetFin,
-        opcode: u8,
-        data: Vec<u8>,
-    },
+struct FrameToSend {
+    set_fin: SetFin,
+    opcode: u8,
+    data: Vec<u8>,
 }
 
 fn close_code_and_reason_from_error(error: Error) -> (usize, String) {
@@ -192,36 +185,27 @@ fn decode_frame_header_payload_lengths(frame: &[u8]) -> Option<(usize, usize)> {
     }
 }
 
-async fn handle_message(
-    message: WorkerMessage,
+async fn send_frame(
+    message: FrameToSend,
     frame_sender: &Mutex<FrameSender>,
-) -> Result<(), ()> {
-    match message {
-        WorkerMessage::Exit => Err(()),
-
-        WorkerMessage::Send {
-            set_fin,
-            opcode,
-            data,
-        } => frame_sender
-            .lock()
-            .await
-            .send_frame(set_fin, opcode, &data)
-            .await
-            .map_err(|_| ()),
-    }
+) -> Result<(), Error> {
+    frame_sender
+        .lock()
+        .await
+        .send_frame(message.set_fin, message.opcode, &message.data)
+        .await
 }
 
-async fn handle_messages(
-    work_in_receiver: mpsc::UnboundedReceiver<WorkerMessage>,
+async fn send_frames(
+    work_in_receiver: mpsc::UnboundedReceiver<FrameToSend>,
     frame_sender: &Mutex<FrameSender>,
-) {
-    let _ = work_in_receiver
+) -> Result<(), Error> {
+    work_in_receiver
         .map(Ok)
         .try_for_each(|message| async {
-            handle_message(message, frame_sender).await
+            send_frame(message, frame_sender).await
         })
-        .await;
+        .await
 }
 
 async fn receive_bytes(
@@ -358,7 +342,7 @@ async fn try_receive_frames(
 // that isn't yet understood.
 #[allow(clippy::mut_mut)]
 async fn worker(
-    work_in_receiver: mpsc::UnboundedReceiver<WorkerMessage>,
+    work_in_receiver: mpsc::UnboundedReceiver<FrameToSend>,
     received_messages: StreamMessageSender,
     connection_tx: Box<dyn ConnectionTx>,
     connection_rx: Box<dyn ConnectionRx>,
@@ -373,8 +357,7 @@ async fn worker(
         connection_tx,
         mask_direction,
     ));
-    let handle_messages_future =
-        handle_messages(work_in_receiver, &frame_sender);
+    let send_frames_future = send_frames(work_in_receiver, &frame_sender);
     let receive_frames_future = receive_frames(
         connection_rx,
         trailer,
@@ -385,7 +368,7 @@ async fn worker(
         close_sent_receiver,
     );
     futures::select!(
-        _ = handle_messages_future.fuse() => {},
+        _ = send_frames_future.fuse() => {},
         _ = receive_frames_future.fuse() => {},
     );
 }
@@ -396,8 +379,8 @@ pub struct WebSocket {
     message_in_progress: MessageInProgress,
     received_messages: StreamMessageReceiver,
 
-    // This sender is used to deliver messages to the worker thread.
-    work_in: mpsc::UnboundedSender<WorkerMessage>,
+    // This is used to send frames through the WebSocket.
+    frame_sender: mpsc::UnboundedSender<FrameToSend>,
 
     // This is our handle to join the worker thread when dropped.
     worker: Option<std::thread::JoinHandle<()>>,
@@ -425,7 +408,7 @@ impl WebSocket {
         &mut self,
         last_fragment: LastFragment,
         payload: T,
-    ) -> Result<WorkerMessage, Error>
+    ) -> Result<FrameToSend, Error>
     where
         T: Into<Vec<u8>>,
     {
@@ -450,7 +433,7 @@ impl WebSocket {
         } else {
             MessageInProgress::None
         };
-        Ok(WorkerMessage::Send {
+        Ok(FrameToSend {
             set_fin,
             opcode,
             data: payload.into(),
@@ -478,14 +461,14 @@ impl WebSocket {
         &mut self,
         code: usize,
         reason: &[u8],
-    ) -> Result<WorkerMessage, Error> {
+    ) -> Result<FrameToSend, Error> {
         if reason.len() + 2 > MAX_CONTROL_FRAME_DATA_LENGTH {
             Err(Error::FramePayloadTooLarge)
         } else if code == 1005 {
             Err(Error::BadCloseCode)
         } else {
             self.close_sent = true;
-            Ok(WorkerMessage::Send {
+            Ok(FrameToSend {
                 set_fin: SetFin::Yes,
                 opcode: OPCODE_CLOSE,
                 data: {
@@ -498,9 +481,9 @@ impl WebSocket {
         }
     }
 
-    fn close_message_without_status(&mut self) -> WorkerMessage {
+    fn close_message_without_status(&mut self) -> FrameToSend {
         self.close_sent = true;
-        WorkerMessage::Send {
+        FrameToSend {
             set_fin: SetFin::Yes,
             opcode: OPCODE_CLOSE,
             data: vec![],
@@ -528,7 +511,7 @@ impl WebSocket {
             close_sent: false,
             message_in_progress: MessageInProgress::None,
             received_messages: stream_message_receiver,
-            work_in: sender,
+            frame_sender: sender,
             worker: Some(thread::spawn(move || {
                 executor::block_on(worker(
                     receiver,
@@ -555,11 +538,11 @@ impl WebSocket {
         })
     }
 
-    fn ping_message(payload: Vec<u8>) -> Result<WorkerMessage, Error> {
+    fn ping_message(payload: Vec<u8>) -> Result<FrameToSend, Error> {
         if payload.len() > MAX_CONTROL_FRAME_DATA_LENGTH {
             Err(Error::FramePayloadTooLarge)
         } else {
-            Ok(WorkerMessage::Send {
+            Ok(FrameToSend {
                 set_fin: SetFin::Yes,
                 opcode: OPCODE_PING,
                 data: payload,
@@ -588,7 +571,7 @@ impl WebSocket {
         &mut self,
         last_fragment: LastFragment,
         payload: T,
-    ) -> Result<WorkerMessage, Error>
+    ) -> Result<FrameToSend, Error>
     where
         T: Into<Vec<u8>>,
     {
@@ -613,7 +596,7 @@ impl WebSocket {
         } else {
             MessageInProgress::None
         };
-        Ok(WorkerMessage::Send {
+        Ok(FrameToSend {
             set_fin,
             opcode,
             data: payload.into(),
@@ -639,7 +622,7 @@ impl Sink<SinkMessage> for WebSocket {
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        self.work_in.poll_ready(cx).map_err(|_| Error::Closed)
+        self.frame_sender.poll_ready(cx).map_err(Error::Sink)
     }
 
     fn start_send(
@@ -665,7 +648,7 @@ impl Sink<SinkMessage> for WebSocket {
             } => self.close_message_with_status(code, reason.as_bytes())?,
             SinkMessage::CloseNoStatus => self.close_message_without_status(),
         };
-        self.work_in.start_send(item).map_err(|_| Error::Closed)
+        self.frame_sender.start_send(item).map_err(Error::Sink)
     }
 
     fn poll_flush(
@@ -685,11 +668,9 @@ impl Sink<SinkMessage> for WebSocket {
 
 impl Drop for WebSocket {
     fn drop(&mut self) {
-        // Tell the worker thread to stop.
-        //
-        // This can fail if the worker stopped early (due to the connection
-        // being lost, for example).
-        let _ = self.work_in.unbounded_send(WorkerMessage::Exit);
+        // Closing the frame sender should cause the worker thread to
+        // complete.
+        self.frame_sender.close_channel();
 
         // Join the worker thread.
         //

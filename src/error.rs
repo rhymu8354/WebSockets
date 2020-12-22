@@ -1,3 +1,5 @@
+use futures::channel::mpsc::SendError;
+
 /// This is the enumeration of all the different kinds of errors which this
 /// crate generates.
 #[derive(Debug, thiserror::Error)]
@@ -124,4 +126,8 @@ pub enum Error {
     /// in an outgoing `close` Frame.
     #[error("invalid code given for close frame")]
     BadCloseCode,
+
+    /// The WebSocket is no longer able to accept sink items.
+    #[error("unable to accept sink item")]
+    Sink(#[from] SendError),
 }
