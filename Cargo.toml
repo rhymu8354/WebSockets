@@ -21,7 +21,7 @@ base64 = "0.13"
 futures = "0.3"
 rand = "0.7"
 sha1 = "0.6"
-rhymuweb = "1.0"
+rhymuweb = "1.1"
 thiserror = "1.0"
 
 [dev-dependencies]
