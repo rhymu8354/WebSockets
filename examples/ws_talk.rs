@@ -40,9 +40,13 @@ fn handle_incoming_message(message: WebSocketStreamMessage) -> bool {
             println!("*** They said something in binary.");
         },
         WebSocketStreamMessage::Close {
-            ..
+            code,
+            reason,
         } => {
-            println!("*** Close received");
+            println!(
+                "*** Close received (code={}, reason=\"{}\")",
+                code, reason
+            );
             return true;
         },
         _ => {},
