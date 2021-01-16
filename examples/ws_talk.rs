@@ -150,7 +150,7 @@ async fn main_async() -> anyhow::Result<()> {
             upgrade,
         } if response.status_code == 101 => {
             let upgrade = upgrade.context(
-                "connection to server lost right after WebSocket protocol upgrade"
+                "connection to server lost right after WebSocket protocol upgrade",
             )?;
             let (connection_rx, connection_tx) = upgrade.connection.split();
             let ws = ws_builder

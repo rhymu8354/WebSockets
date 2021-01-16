@@ -676,11 +676,13 @@ impl Drop for WebSocket {
         //
         // This shouldn't fail unless the worker panics.  If it does, there's
         // no reason why we shouldn't panic as well.
-        self.worker.take().expect(
-            "somehow the worker thread join handle got lost before we could take it"
-        ).join().expect(
-            "the worker thread panicked before we could join it"
-        );
+        self.worker
+            .take()
+            .expect(
+                "somehow the worker thread join handle got lost before we could take it",
+            )
+            .join()
+            .expect("the worker thread panicked before we could join it");
     }
 }
 
@@ -803,7 +805,10 @@ mod tests {
                         // Expect to receive back the matching "PONG" message
                         // which the WebSocket should send when it gets the
                         // "PING".
-                        let output = connection_back_tx.borrow_mut().web_socket_output_async().await;
+                        let output = connection_back_tx
+                            .borrow_mut()
+                            .web_socket_output_async()
+                            .await;
                         assert!(output.is_some());
                         let output = output.unwrap();
 

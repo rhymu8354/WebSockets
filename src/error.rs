@@ -26,7 +26,9 @@ pub enum Error {
     /// The WebSocket could not be opened because the HTTP response in the
     /// opening handshake did not contain the correct value for the
     /// `Sec-WebSocket-Accept` header.
-    #[error("the upgrade response did not contain the correct `Sec-WebSocket-Accept` header")]
+    #[error(
+        "the upgrade response did not contain the correct `Sec-WebSocket-Accept` header"
+    )]
     InvalidHandshakeResponse,
 
     /// The WebSocket could not be opened because the HTTP response in the
@@ -56,7 +58,9 @@ pub enum Error {
 
     /// The WebSocket could not be opened because the HTTP request in the
     /// opening handshake did not request upgrading the connection.
-    #[error("the upgrade request did not indicate that the connection should be upgraded")]
+    #[error(
+        "the upgrade request did not indicate that the connection should be upgraded"
+    )]
     UpgradeNotRequested,
 
     /// The WebSocket could not be opened because the HTTP request in the
@@ -74,7 +78,9 @@ pub enum Error {
     /// The WebSocket could not be opened because the HTTP request in the
     /// opening handshake did not contain a proper value for the
     /// `Sec-WebSocket-Accept` header.
-    #[error("the upgrade request did not contain a proper `Sec-WebSocket-Accept` header")]
+    #[error(
+        "the upgrade request did not contain a proper `Sec-WebSocket-Accept` header"
+    )]
     InvalidHandshakeRequest,
 
     /// The WebSocket could not be opened because the HTTP request in the
