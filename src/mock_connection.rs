@@ -34,7 +34,7 @@ impl BackEndTx {
 }
 
 impl BackEndRx {
-    pub async fn close(&mut self) {
+    pub fn close(&mut self) {
         self.sender.close_channel();
     }
 

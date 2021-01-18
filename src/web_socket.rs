@@ -1431,7 +1431,7 @@ mod tests {
             );
 
             // Now the we're done, we can close the connection.
-            connection_back_rx.borrow_mut().close().await;
+            connection_back_rx.borrow_mut().close();
         };
         connection_back_rx.borrow_mut().web_socket_input(&b"\x88\x80XXXX"[..]);
         assert_eq!(
@@ -1468,7 +1468,7 @@ mod tests {
                         assert_eq!("reserved bits set", reason);
 
                         // Now the we're done, we can close the connection.
-                        connection_back_rx.borrow_mut().close().await;
+                        connection_back_rx.borrow_mut().close();
                         true
                     },
 
@@ -1516,7 +1516,7 @@ mod tests {
                         assert_eq!("unexpected continuation frame", reason);
 
                         // Now the we're done, we can close the connection.
-                        connection_back_rx.borrow_mut().close().await;
+                        connection_back_rx.borrow_mut().close();
                         true
                     },
 
@@ -1564,7 +1564,7 @@ mod tests {
                         assert_eq!("last message incomplete", reason);
 
                         // Now the we're done, we can close the connection.
-                        connection_back_rx.borrow_mut().close().await;
+                        connection_back_rx.borrow_mut().close();
                         true
                     },
 
@@ -1613,7 +1613,7 @@ mod tests {
                         assert_eq!("last message incomplete", reason);
 
                         // Now the we're done, we can close the connection.
-                        connection_back_rx.borrow_mut().close().await;
+                        connection_back_rx.borrow_mut().close();
                         true
                     },
 
@@ -1662,7 +1662,7 @@ mod tests {
                         assert_eq!("unknown opcode", reason);
 
                         // Now the we're done, we can close the connection.
-                        connection_back_rx.borrow_mut().close().await;
+                        connection_back_rx.borrow_mut().close();
                         true
                     },
 
@@ -1710,7 +1710,7 @@ mod tests {
                         assert_eq!("unmasked frame", reason);
 
                         // Now the we're done, we can close the connection.
-                        connection_back_rx.borrow_mut().close().await;
+                        connection_back_rx.borrow_mut().close();
                         true
                     },
 
@@ -1758,7 +1758,7 @@ mod tests {
                         assert_eq!("masked frame", reason);
 
                         // Now the we're done, we can close the connection.
-                        connection_back_rx.borrow_mut().close().await;
+                        connection_back_rx.borrow_mut().close();
                         true
                     },
 
@@ -1815,7 +1815,7 @@ mod tests {
                         );
 
                         // Now the we're done, we can close the connection.
-                        connection_back_rx.borrow_mut().close().await;
+                        connection_back_rx.borrow_mut().close();
                         true
                     },
 
@@ -1824,9 +1824,7 @@ mod tests {
             })
             .await
         };
-        executor::block_on(async {
-            connection_back_rx.borrow_mut().close().await;
-        });
+        connection_back_rx.borrow_mut().close();
         assert_eq!(
             Ok(true),
             executor::block_on(timeout(
@@ -1864,7 +1862,7 @@ mod tests {
                         );
 
                         // Now the we're done, we can close the connection.
-                        connection_back_rx.borrow_mut().close().await;
+                        connection_back_rx.borrow_mut().close();
                         true
                     },
 
@@ -1972,7 +1970,7 @@ mod tests {
                         );
 
                         // Now the we're done, we can close the connection.
-                        connection_back_rx.borrow_mut().close().await;
+                        connection_back_rx.borrow_mut().close();
                         true
                     },
 
@@ -2021,7 +2019,7 @@ mod tests {
                         );
 
                         // Now the we're done, we can close the connection.
-                        connection_back_rx.borrow_mut().close().await;
+                        connection_back_rx.borrow_mut().close();
                         true
                     },
 
@@ -2079,7 +2077,7 @@ mod tests {
                         assert_eq!("frame too large", reason);
 
                         // Now the we're done, we can close the connection.
-                        connection_back_rx.borrow_mut().close().await;
+                        connection_back_rx.borrow_mut().close();
                         true
                     },
 
@@ -2124,7 +2122,7 @@ mod tests {
                         assert_eq!("fragmented control frame", reason);
 
                         // Now the we're done, we can close the connection.
-                        connection_back_rx.borrow_mut().close().await;
+                        connection_back_rx.borrow_mut().close();
                         true
                     },
 
@@ -2169,7 +2167,7 @@ mod tests {
                         assert_eq!("fragmented control frame", reason);
 
                         // Now the we're done, we can close the connection.
-                        connection_back_rx.borrow_mut().close().await;
+                        connection_back_rx.borrow_mut().close();
                         true
                     },
 
@@ -2212,7 +2210,7 @@ mod tests {
                         assert_eq!("fragmented control frame", reason);
 
                         // Now the we're done, we can close the connection.
-                        connection_back_rx.borrow_mut().close().await;
+                        connection_back_rx.borrow_mut().close();
                         true
                     },
 
@@ -2278,7 +2276,7 @@ mod tests {
                         assert_eq!("frame too large", reason);
 
                         // Now the we're done, we can close the connection.
-                        connection_back_rx.borrow_mut().close().await;
+                        connection_back_rx.borrow_mut().close();
                         true
                     },
 
@@ -2338,7 +2336,7 @@ mod tests {
                                 .await;
 
                             // Now the we're done, we can close the connection.
-                            // connection_back_rx.borrow_mut().close().await;
+                            connection_back_rx.borrow_mut().close();
                             true
                         },
 
@@ -2409,7 +2407,7 @@ mod tests {
                         assert_eq!("illegal close code", reason);
 
                         // Now the we're done, we can close the connection.
-                        connection_back_rx.borrow_mut().close().await;
+                        connection_back_rx.borrow_mut().close();
                         true
                     },
 
