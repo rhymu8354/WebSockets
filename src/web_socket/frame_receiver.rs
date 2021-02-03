@@ -209,6 +209,7 @@ impl<'a> FrameReceiver<'a> {
         let _ = self.received_messages.unbounded_send(StreamMessage::Close {
             code,
             reason,
+            reply_sent: false,
         });
         Ok(())
     }

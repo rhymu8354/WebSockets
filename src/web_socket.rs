@@ -114,6 +114,7 @@ pub enum StreamMessage {
     Close {
         code: usize,
         reason: String,
+        reply_sent: bool,
     },
 }
 
@@ -251,6 +252,7 @@ async fn receive_frames(
         let _ = received_messages.unbounded_send(StreamMessage::Close {
             code,
             reason: reason.clone(),
+            reply_sent: true,
         });
         frame_sender.lock().await.send_close(code, reason).await;
     }
@@ -1205,11 +1207,14 @@ mod tests {
                     if let StreamMessage::Close {
                         code,
                         reason,
+                        reply_sent,
                     } = message
                     {
-                        // Check that the code and reason are correct.
+                        // Check that the code, reason, and reply_sent are
+                        // correct.
                         assert_eq!(1005, code);
                         assert_eq!("", reason);
+                        assert_eq!(false, reply_sent);
                     } else {
                         panic!("we got something that isn't a text!");
                     }
@@ -1271,11 +1276,14 @@ mod tests {
                     if let StreamMessage::Close {
                         code,
                         reason,
+                        reply_sent,
                     } = message
                     {
-                        // Check that the code and reason are correct.
+                        // Check that the code, reason, and reply_sent are
+                        // correct.
                         assert_eq!(1000, code);
                         assert_eq!("Bye", reason);
+                        assert_eq!(false, reply_sent);
                     } else {
                         panic!("we got something that isn't a close!");
                     }
@@ -1382,10 +1390,13 @@ mod tests {
                         StreamMessage::Close {
                             code,
                             reason,
+                            reply_sent,
                         } => {
-                            // Check that the code and reason are correct.
+                            // Check that the code, reason, and reply_sent are
+                            // correct.
                             assert_eq!(1005, code);
                             assert_eq!("", reason);
+                            assert_eq!(false, reply_sent);
 
                             // Send a "PING" out before we close our end.
                             assert!(dbg!(
@@ -1462,10 +1473,13 @@ mod tests {
                     StreamMessage::Close {
                         code,
                         reason,
+                        reply_sent,
                     } => {
-                        // Check that the code and reason are correct.
+                        // Check that the code, reason, and reply_sent are
+                        // correct.
                         assert_eq!(1002, code);
                         assert_eq!("reserved bits set", reason);
+                        assert_eq!(true, reply_sent);
 
                         // Now the we're done, we can close the connection.
                         connection_back_rx.borrow_mut().close();
@@ -1510,10 +1524,13 @@ mod tests {
                     StreamMessage::Close {
                         code,
                         reason,
+                        reply_sent,
                     } => {
-                        // Check that the code and reason are correct.
+                        // Check that the code, reason, and reply_sent are
+                        // correct.
                         assert_eq!(1002, code);
                         assert_eq!("unexpected continuation frame", reason);
+                        assert_eq!(true, reply_sent);
 
                         // Now the we're done, we can close the connection.
                         connection_back_rx.borrow_mut().close();
@@ -1558,10 +1575,13 @@ mod tests {
                     StreamMessage::Close {
                         code,
                         reason,
+                        reply_sent,
                     } => {
-                        // Check that the code and reason are correct.
+                        // Check that the code, reason, and reply_sent are
+                        // correct.
                         assert_eq!(1002, code);
                         assert_eq!("last message incomplete", reason);
+                        assert_eq!(true, reply_sent);
 
                         // Now the we're done, we can close the connection.
                         connection_back_rx.borrow_mut().close();
@@ -1607,10 +1627,13 @@ mod tests {
                     StreamMessage::Close {
                         code,
                         reason,
+                        reply_sent,
                     } => {
-                        // Check that the code and reason are correct.
+                        // Check that the code, reason, and reply_sent are
+                        // correct.
                         assert_eq!(1002, code);
                         assert_eq!("last message incomplete", reason);
+                        assert_eq!(true, reply_sent);
 
                         // Now the we're done, we can close the connection.
                         connection_back_rx.borrow_mut().close();
@@ -1656,10 +1679,13 @@ mod tests {
                     StreamMessage::Close {
                         code,
                         reason,
+                        reply_sent,
                     } => {
-                        // Check that the code and reason are correct.
+                        // Check that the code, reason, and reply_sent are
+                        // correct.
                         assert_eq!(1002, code);
                         assert_eq!("unknown opcode", reason);
+                        assert_eq!(true, reply_sent);
 
                         // Now the we're done, we can close the connection.
                         connection_back_rx.borrow_mut().close();
@@ -1704,10 +1730,13 @@ mod tests {
                     StreamMessage::Close {
                         code,
                         reason,
+                        reply_sent,
                     } => {
-                        // Check that the code and reason are correct.
+                        // Check that the code, reason, and reply_sent are
+                        // correct.
                         assert_eq!(1002, code);
                         assert_eq!("unmasked frame", reason);
+                        assert_eq!(true, reply_sent);
 
                         // Now the we're done, we can close the connection.
                         connection_back_rx.borrow_mut().close();
@@ -1752,10 +1781,13 @@ mod tests {
                     StreamMessage::Close {
                         code,
                         reason,
+                        reply_sent,
                     } => {
-                        // Check that the code and reason are correct.
+                        // Check that the code, reason, and reply_sent are
+                        // correct.
                         assert_eq!(1002, code);
                         assert_eq!("masked frame", reason);
+                        assert_eq!(true, reply_sent);
 
                         // Now the we're done, we can close the connection.
                         connection_back_rx.borrow_mut().close();
@@ -1806,13 +1838,16 @@ mod tests {
                     StreamMessage::Close {
                         code,
                         reason,
+                        reply_sent,
                     } => {
-                        // Check that the code and reason are correct.
+                        // Check that the code, reason, and reply_sent are
+                        // correct.
                         assert_eq!(1006, code);
                         assert_eq!(
                             "underlying connection closed gracefully",
                             reason
                         );
+                        assert_eq!(true, reply_sent);
 
                         // Now the we're done, we can close the connection.
                         connection_back_rx.borrow_mut().close();
@@ -1853,13 +1888,16 @@ mod tests {
                     StreamMessage::Close {
                         code,
                         reason,
+                        reply_sent,
                     } => {
-                        // Check that the code and reason are correct.
+                        // Check that the code, reason, and reply_sent are
+                        // correct.
                         assert_eq!(1007, code);
                         assert_eq!(
                             "invalid UTF-8 encoding in text message",
                             reason
                         );
+                        assert_eq!(true, reply_sent);
 
                         // Now the we're done, we can close the connection.
                         connection_back_rx.borrow_mut().close();
@@ -1961,13 +1999,16 @@ mod tests {
                     StreamMessage::Close {
                         code,
                         reason,
+                        reply_sent,
                     } => {
-                        // Check that the code and reason are correct.
+                        // Check that the code, reason, and reply_sent are
+                        // correct.
                         assert_eq!(1007, code);
                         assert_eq!(
                             "invalid UTF-8 encoding in text message",
                             reason
                         );
+                        assert_eq!(true, reply_sent);
 
                         // Now the we're done, we can close the connection.
                         connection_back_rx.borrow_mut().close();
@@ -2010,13 +2051,16 @@ mod tests {
                     StreamMessage::Close {
                         code,
                         reason,
+                        reply_sent,
                     } => {
-                        // Check that the code and reason are correct.
+                        // Check that the code, reason, and reply_sent are
+                        // correct.
                         assert_eq!(1007, code);
                         assert_eq!(
                             "invalid UTF-8 encoding in close reason",
                             reason
                         );
+                        assert_eq!(true, reply_sent);
 
                         // Now the we're done, we can close the connection.
                         connection_back_rx.borrow_mut().close();
@@ -2071,10 +2115,13 @@ mod tests {
                     StreamMessage::Close {
                         code,
                         reason,
+                        reply_sent,
                     } => {
-                        // Check that the code and reason are correct.
+                        // Check that the code, reason, and reply_sent are
+                        // correct.
                         assert_eq!(1009, code);
                         assert_eq!("frame too large", reason);
+                        assert_eq!(true, reply_sent);
 
                         // Now the we're done, we can close the connection.
                         connection_back_rx.borrow_mut().close();
@@ -2116,10 +2163,13 @@ mod tests {
                     StreamMessage::Close {
                         code,
                         reason,
+                        reply_sent,
                     } => {
-                        // Check that the code and reason are correct.
+                        // Check that the code, reason, and reply_sent are
+                        // correct.
                         assert_eq!(1002, code);
                         assert_eq!("fragmented control frame", reason);
+                        assert_eq!(true, reply_sent);
 
                         // Now the we're done, we can close the connection.
                         connection_back_rx.borrow_mut().close();
@@ -2161,10 +2211,13 @@ mod tests {
                     StreamMessage::Close {
                         code,
                         reason,
+                        reply_sent,
                     } => {
-                        // Check that the code and reason are correct.
+                        // Check that the code, reason, and reply_sent are
+                        // correct.
                         assert_eq!(1002, code);
                         assert_eq!("fragmented control frame", reason);
+                        assert_eq!(true, reply_sent);
 
                         // Now the we're done, we can close the connection.
                         connection_back_rx.borrow_mut().close();
@@ -2204,10 +2257,13 @@ mod tests {
                     StreamMessage::Close {
                         code,
                         reason,
+                        reply_sent,
                     } => {
-                        // Check that the code and reason are correct.
+                        // Check that the code, reason, and reply_sent are
+                        // correct.
                         assert_eq!(1002, code);
                         assert_eq!("fragmented control frame", reason);
+                        assert_eq!(true, reply_sent);
 
                         // Now the we're done, we can close the connection.
                         connection_back_rx.borrow_mut().close();
@@ -2270,10 +2326,13 @@ mod tests {
                     StreamMessage::Close {
                         code,
                         reason,
+                        reply_sent,
                     } => {
-                        // Check that the code and reason are correct.
+                        // Check that the code, reason, and reply_sent are
+                        // correct.
                         assert_eq!(1002, code);
                         assert_eq!("frame too large", reason);
+                        assert_eq!(true, reply_sent);
 
                         // Now the we're done, we can close the connection.
                         connection_back_rx.borrow_mut().close();
@@ -2323,13 +2382,15 @@ mod tests {
                         StreamMessage::Close {
                             code,
                             reason,
+                            reply_sent,
                         } => {
-                            // Check that the code and reason are correct.
+                            // Check that the code, reason, and reply_sent are
+                            // correct.
                             assert_eq!(1005, code);
                             assert_eq!("", reason);
+                            assert_eq!(false, reply_sent);
 
                             // Send back a close.
-                            // TODO: We might want WebSocket to do this for us?
                             let _ = sink
                                 .borrow_mut()
                                 .send(SinkMessage::CloseNoStatus)
@@ -2401,10 +2462,13 @@ mod tests {
                     StreamMessage::Close {
                         code,
                         reason,
+                        reply_sent,
                     } => {
-                        // Check that the code and reason are correct.
+                        // Check that the code, reason, and reply_sent are
+                        // correct.
                         assert_eq!(1002, code);
                         assert_eq!("illegal close code", reason);
+                        assert_eq!(true, reply_sent);
 
                         // Now the we're done, we can close the connection.
                         connection_back_rx.borrow_mut().close();
