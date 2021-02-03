@@ -77,19 +77,21 @@ async fn serve_websocket(
                 websockets::StreamMessage::Close {
                     code,
                     reason,
+                    reply_sent,
                 } => {
-                    let _ = sink
-                        .borrow_mut()
-                        .send(if code == 1005 {
-                            websockets::SinkMessage::CloseNoStatus
-                        } else {
-                            websockets::SinkMessage::Close {
-                                code,
-                                reason,
-                            }
-                        })
-                        .await;
-                    let _ = sink.borrow_mut().close().await;
+                    if !reply_sent {
+                        let _ = sink
+                            .borrow_mut()
+                            .send(if code == 1005 {
+                                websockets::SinkMessage::CloseNoStatus
+                            } else {
+                                websockets::SinkMessage::Close {
+                                    code,
+                                    reason,
+                                }
+                            })
+                            .await;
+                    }
                 },
             }
         })
