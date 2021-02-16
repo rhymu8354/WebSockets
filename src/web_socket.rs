@@ -106,6 +106,7 @@ pub enum SinkMessage {
     CloseNoStatus,
 }
 
+#[derive(Debug)]
 pub enum StreamMessage {
     Ping(Vec<u8>),
     Pong(Vec<u8>),
