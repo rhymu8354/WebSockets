@@ -45,8 +45,8 @@ fn handle_incoming_message(message: WebSocketStreamMessage) -> bool {
             reply_sent,
         } => {
             println!(
-                "*** Close received (code={}, reason=\"{}\")",
-                code, reason
+                "*** Close received (code={}, reason=\"{}\", reply_sent={})",
+                code, reason, reply_sent
             );
             return true;
         },
