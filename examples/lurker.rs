@@ -50,7 +50,7 @@ fn handle_incoming_message(
                 println!("*** Twitch PINGed us!  How could they?!");
                 MessageTypeReceived::Ping
             } else {
-                println!("*** Chat said: {}", message);
+                println!("*** Chat said: {:?}", message);
                 MessageTypeReceived::Chat
             }
         },
