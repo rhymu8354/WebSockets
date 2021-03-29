@@ -45,7 +45,7 @@ impl BackEndRx {
         T: Into<Vec<u8>>,
     {
         let data = data.into();
-        let _ = self.sender.unbounded_send(data);
+        std::mem::drop(self.sender.unbounded_send(data));
     }
 }
 
