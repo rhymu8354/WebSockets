@@ -20,6 +20,7 @@ use rand::{
 
 pub struct FrameSender {
     close_sent: Option<oneshot::Sender<()>>,
+    close_timeout_begin_sender: Option<oneshot::Sender<()>>,
     connection_tx: Box<dyn ConnectionTx>,
     mask_direction: MaskDirection,
     rng: StdRng,
@@ -28,11 +29,13 @@ pub struct FrameSender {
 impl FrameSender {
     pub fn new(
         close_sent: oneshot::Sender<()>,
+        close_timeout_begin_sender: oneshot::Sender<()>,
         connection_tx: Box<dyn ConnectionTx>,
         mask_direction: MaskDirection,
     ) -> Self {
         Self {
             close_sent: Some(close_sent),
+            close_timeout_begin_sender: Some(close_timeout_begin_sender),
             connection_tx,
             mask_direction,
             rng: StdRng::from_entropy(),
@@ -120,6 +123,11 @@ impl FrameSender {
         if opcode == OPCODE_CLOSE || written.is_err() {
             let _ = self
                 .close_sent
+                .take()
+                .expect("should not send CLOSE twice")
+                .send(());
+            let _ = self
+                .close_timeout_begin_sender
                 .take()
                 .expect("should not send CLOSE twice")
                 .send(());

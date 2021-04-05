@@ -65,6 +65,11 @@ const MAX_CONTROL_FRAME_DATA_LENGTH: usize = 125;
 // underlying connection for a WebSocket when accepting a new frame.
 const INITIAL_READ_CHUNK_SIZE: usize = 65536;
 
+// This is the maximum amount of time to wait for a close frame to be
+// received after one is sent, before the WebSocket closes the underlying
+// connection.
+const CLOSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 #[derive(Clone, Copy)]
 pub enum LastFragment {
     Yes,
@@ -229,6 +234,11 @@ async fn receive_bytes(
     Ok(received)
 }
 
+async fn close_timeout(close_timeout_begin_receiver: oneshot::Receiver<()>) {
+    let _ = close_timeout_begin_receiver.await;
+    futures_timer::Delay::new(CLOSE_TIMEOUT).await;
+}
+
 async fn receive_frames(
     connection_rx: Box<dyn ConnectionRx>,
     trailer: Vec<u8>,
@@ -355,8 +365,11 @@ async fn worker(
 ) {
     // Drive to completion the stream of messages to the worker thread.
     let (close_sent_sender, close_sent_receiver) = oneshot::channel();
+    let (close_timeout_begin_sender, close_timeout_begin_receiver) =
+        oneshot::channel();
     let frame_sender = Mutex::new(FrameSender::new(
         close_sent_sender,
+        close_timeout_begin_sender,
         connection_tx,
         mask_direction,
     ));
@@ -370,9 +383,11 @@ async fn worker(
         &frame_sender,
         close_sent_receiver,
     );
+    let close_timeout_future = close_timeout(close_timeout_begin_receiver);
     futures::select!(
         _ = send_frames_future.fuse() => {},
         _ = receive_frames_future.fuse() => {},
+        _ = close_timeout_future.fuse() => {},
     );
 }
 
