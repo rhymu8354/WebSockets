@@ -190,7 +190,7 @@ async fn run_test(
     let sender_for_factory = sender.clone();
     server.register(
         &[b"".to_vec()][..],
-        Arc::new(move |request, connection| {
+        Arc::new(move |request, _address, connection| {
             handle_test_factory(request, connection, sender_for_factory.clone())
         }),
     );
